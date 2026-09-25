@@ -66,10 +66,42 @@ class VoiceCurator:
         if not os.path.exists(audio_path) or not clean_intervals:
             return None
 
-        # Cargar audio original
-        waveform, sr = torchaudio.load(audio_path)
-        if waveform.shape[0] > 1:
-            waveform = torch.mean(waveform, dim=0, keepdim=True)
+        # Cargar audio original de forma robusta
+        waveform = None
+        sr = 48000
+        try:
+            waveform, sr = torchaudio.load(audio_path)
+            if waveform.shape[0] > 1:
+                waveform = torch.mean(waveform, dim=0, keepdim=True)
+        except Exception:
+            pass
+
+        if waveform is None:
+            import av
+            try:
+                container = av.open(audio_path)
+                stream = container.streams.audio[0]
+                sr = stream.rate or 48000
+                resampler = av.AudioResampler(format="flt", layout="mono", rate=sr)
+                chunks = []
+                for packet in container.demux(stream):
+                    if packet.size == 0:
+                        continue
+                    try:
+                        for f in packet.decode():
+                            for rf in resampler.resample(f):
+                                chunks.append(rf.to_ndarray())
+                    except Exception:
+                        continue
+                container.close()
+                if chunks:
+                    audio_np = np.concatenate(chunks, axis=1)
+                    waveform = torch.from_numpy(audio_np)
+            except Exception:
+                return None
+
+        if waveform is None:
+            return None
 
         total_samples = waveform.shape[1]
         extracted_chunks = []

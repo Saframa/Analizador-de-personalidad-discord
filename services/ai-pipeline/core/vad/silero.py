@@ -54,18 +54,50 @@ class SileroVADDetector:
 
         from silero_vad import read_audio, get_speech_timestamps
 
+        wav = None
         try:
             wav = read_audio(audio_path, sampling_rate=target_sample_rate)
-        except Exception as e:
-            # Si falla read_audio (ej. formato exótico), intentar con torchaudio / soundfile
-            import torchaudio
-            waveform, sr = torchaudio.load(audio_path)
-            if waveform.shape[0] > 1:
-                waveform = torch.mean(waveform, dim=0, keepdim=True)
-            if sr != target_sample_rate:
-                resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=target_sample_rate)
-                waveform = resampler(waveform)
-            wav = waveform.squeeze(0)
+        except Exception:
+            pass
+
+        if wav is None:
+            try:
+                import torchaudio
+                waveform, sr = torchaudio.load(audio_path)
+                if waveform.shape[0] > 1:
+                    waveform = torch.mean(waveform, dim=0, keepdim=True)
+                if sr != target_sample_rate:
+                    resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=target_sample_rate)
+                    waveform = resampler(waveform)
+                wav = waveform.squeeze(0)
+            except Exception:
+                pass
+
+        if wav is None:
+            # Fallback ultra-resistente con PyAV ante paquetes corruptos o libsndfile malformed
+            import av
+            import numpy as np
+
+            container = av.open(audio_path)
+            resampler = av.AudioResampler(format="flt", layout="mono", rate=target_sample_rate)
+            chunks = []
+            stream = container.streams.audio[0]
+            for packet in container.demux(stream):
+                if packet.size == 0:
+                    continue
+                try:
+                    for f in packet.decode():
+                        for rf in resampler.resample(f):
+                            chunks.append(rf.to_ndarray())
+                except Exception:
+                    continue
+            container.close()
+
+            if chunks:
+                audio_np = np.concatenate(chunks, axis=1).squeeze(0)
+                wav = torch.from_numpy(audio_np)
+            else:
+                return []
 
         # Si no hay muestras suficientes (< 0.1 seg)
         if wav.shape[-1] < target_sample_rate * 0.1:

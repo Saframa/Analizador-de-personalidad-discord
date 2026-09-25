@@ -150,18 +150,26 @@ class UserManager:
         self,
         user_id: str,
         display_name: Optional[str] = None,
+        nicknames: Optional[List[str]] = None,
+        notes: Optional[List[str]] = None,
         add_nicknames: Optional[List[str]] = None,
         add_notes: Optional[List[str]] = None,
         primary_role: Optional[str] = None,
         humor_type: Optional[str] = None,
     ) -> UserProfile:
-        """Actualiza campos específicos y agrega apodos o notas sin duplicar."""
+        """Actualiza campos específicos, permitiendo reemplazar o agregar apodos y notas."""
         profile = self.get_user(user_id)
         if not profile:
             raise FileNotFoundError(f"Usuario con identificador '{user_id}' no encontrado.")
 
         if display_name is not None and display_name.strip():
             profile.display_name = display_name.strip()
+
+        if nicknames is not None:
+            profile.nicknames = [n.strip() for n in nicknames if n.strip()]
+
+        if notes is not None:
+            profile.notes = [n.strip() for n in notes if n.strip()]
 
         if add_nicknames:
             current_nicks = set(n.lower() for n in profile.nicknames)

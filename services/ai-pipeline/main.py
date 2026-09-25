@@ -730,11 +730,15 @@ def handle_user_command(args, base_storage_dir: str):
     elif args.user_action == "update":
         nicks = [n.strip() for n in args.nicknames.split(",") if n.strip()] if args.nicknames else None
         notes = [n.strip() for n in args.notes.split(",") if n.strip()] if args.notes else None
+        add_nicks = [n.strip() for n in args.add_nicknames.split(",") if n.strip()] if getattr(args, "add_nicknames", None) else None
+        add_notes = [n.strip() for n in args.add_notes.split(",") if n.strip()] if getattr(args, "add_notes", None) else None
         profile = user_mgr.update_user(
             user_id=args.user_id,
             display_name=args.display_name,
-            add_nicknames=nicks,
-            add_notes=notes,
+            nicknames=nicks,
+            notes=notes,
+            add_nicknames=add_nicks,
+            add_notes=add_notes,
             primary_role=args.role,
             humor_type=args.humor,
         )
@@ -992,8 +996,10 @@ def main():
     user_update_parser = user_subparsers.add_parser("update", help="Actualiza datos, apodos y notas de un usuario")
     user_update_parser.add_argument("--user-id", type=str, required=True, help="ID, username, display_name o apodo del usuario")
     user_update_parser.add_argument("--display-name", type=str, default=None, help="Nuevo nombre o apodo visible")
-    user_update_parser.add_argument("--nicknames", type=str, default=None, help="Nuevos apodos a agregar (separados por coma)")
-    user_update_parser.add_argument("--notes", type=str, default=None, help="Nuevas notas a agregar (separadas por coma)")
+    user_update_parser.add_argument("--nicknames", type=str, default=None, help="Reemplaza todos los apodos (separados por coma)")
+    user_update_parser.add_argument("--notes", type=str, default=None, help="Reemplaza todas las notas (separadas por coma)")
+    user_update_parser.add_argument("--add-nicknames", type=str, default=None, help="Suma nuevos apodos a los existentes (separados por coma)")
+    user_update_parser.add_argument("--add-notes", type=str, default=None, help="Suma nuevas notas a las existentes (separadas por coma)")
     user_update_parser.add_argument("--role", type=str, default=None, help="Nuevo rol en el grupo")
     user_update_parser.add_argument("--humor", type=str, default=None, help="Nuevo estilo de humor")
     user_update_parser.add_argument("--storage-dir", type=str, default="", help="Ruta base del directorio de almacenamiento")

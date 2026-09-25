@@ -10,6 +10,14 @@ import os
 from typing import Any, Dict, List, Optional
 import torch
 
+if os.name == "nt":
+    try:
+        torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
+        if os.path.exists(torch_lib):
+            os.add_dll_directory(torch_lib)
+    except Exception:
+        pass
+
 DEFAULT_URUGUAYAN_PROMPT = (
     "Transcripción de conversación informal entre amigos de Uruguay y el Río de la Plata. "
     "Léxico común y modismos: bo, ta, salado, de menos, posta, che, pará, zarpado, fiera, gurí, mirá, viste."

@@ -34,6 +34,8 @@ from core.profiler.gemini_analyzer import GeminiProfiler
 from core.profiler.metrics import compute_user_metrics
 from core.profiler.profile_synthesizer import ProfileSynthesizer
 from core.stt.transcriber import WhisperTranscriber, release_gpu_memory
+from core.tts.cloner import get_voice_cloner, release_tts_gpu_memory
+from core.tts.player import play_audio_file
 from core.twin.chat_session import DigitalTwinChat
 from core.twin.compiler import compile_twin_prompt, extract_few_shot_dialogues
 from core.vad.overlap_detector import (
@@ -368,9 +370,12 @@ def interactive_chat(
     model_name: str = "gemini-flash-latest",
     mock: bool = False,
     single_turn_prompt: Optional[str] = None,
+    enable_voice: bool = False,
+    play_audio: bool = False,
 ) -> None:
     """
     Inicia una sesión interactiva de conversación en consola con el Gemelo Digital de un amigo.
+    Opcionalmente sintetiza la voz (TTS) con F5-TTS y la reproduce por altavoces.
     """
     profiles_dir = os.path.join(base_storage_dir, "profiles")
     if not os.path.exists(profiles_dir):
@@ -448,6 +453,13 @@ def interactive_chat(
         mock=mock,
     )
 
+    cloner = None
+    if enable_voice:
+        try:
+            cloner = get_voice_cloner(mock=mock)
+        except Exception as e:
+            print(f"⚠️ No se pudo inicializar el clonador de voz: {e}")
+
     comm = selected_profile.communication_style
     print("\n" + "=" * 65)
     print(f"🤖 GEMELO DIGITAL: {selected_profile.username} (@{selected_profile.user_id})")
@@ -458,14 +470,34 @@ def interactive_chat(
     print(f"🇺🇾 Modismos preferidos: {', '.join(selected_profile.dialect_markers.favorite_slang) or 'bo, ta, flama'}")
     print(f"🔥 Temperatura modelo: {chat.temperature} (calibrada por Big Five)")
     print(f"🧠 Backend:            {chat.model_name} (mock={chat.mock})")
+    print(f"🎙️ Clonación de voz:  {'ACTIVA (F5-TTS)' if cloner else 'Desactivada'}")
+    if play_audio and cloner:
+        print("🔊 Reproducción audio: ACTIVA (Altavoces)")
     print("-" * 65)
     print("Escribe tu mensaje y presiona Enter. (Escribe 'salir' para terminar).")
     print("=" * 65 + "\n")
+
+    def _speak_reply(text_reply: str) -> None:
+        if cloner:
+            try:
+                out_wav = cloner.clone_for_user(
+                    user_id=selected_profile.user_id,
+                    target_text=text_reply,
+                    base_storage_dir=base_storage_dir,
+                )
+                print(f"   🔊 [Audio clonado: {out_wav}]")
+                if play_audio:
+                    play_audio_file(out_wav)
+            except Exception as e:
+                print(f"   ⚠️ [Error en síntesis de voz: {e}]")
 
     if single_turn_prompt:
         print(f"Tú: {single_turn_prompt}")
         reply = chat.send_message(single_turn_prompt)
         print(f"{selected_profile.username}: {reply}\n")
+        _speak_reply(reply)
+        if cloner:
+            release_tts_gpu_memory()
         return
 
     while True:
@@ -474,14 +506,51 @@ def interactive_chat(
             if not user_msg:
                 continue
             if user_msg.lower() in ["salir", "exit", "quit", "chau"]:
-                print(f"\n{selected_profile.username}: ¡Nos vemos, bo! Cuidate.\n")
+                farewell = "¡Nos vemos, bo! Cuidate."
+                print(f"\n{selected_profile.username}: {farewell}\n")
+                _speak_reply(farewell)
                 break
 
             reply = chat.send_message(user_msg)
             print(f"\n{selected_profile.username}: {reply}\n")
+            _speak_reply(reply)
         except (KeyboardInterrupt, EOFError):
             print(f"\n\n{selected_profile.username}: ¡Chau che, nos vemos!\n")
             break
+
+    if cloner:
+        release_tts_gpu_memory()
+
+
+def synthesize_user_voice(
+    user_id: str,
+    text: str,
+    base_storage_dir: str,
+    output_path: Optional[str] = None,
+    mock: bool = False,
+    play: bool = False,
+) -> str:
+    """
+    Sintetiza cualquier texto con la voz curada de un amigo utilizando F5-TTS en la GPU.
+    """
+    print("\n" + "=" * 65)
+    print(f"🎙️ SINTETIZADOR DE VOZ CLONADA (ZERO-SHOT): Usuario @{user_id}")
+    print("=" * 65)
+    cloner = get_voice_cloner(mock=mock)
+    try:
+        out_wav = cloner.clone_for_user(
+            user_id=user_id,
+            target_text=text,
+            base_storage_dir=base_storage_dir,
+            output_path=output_path,
+        )
+        print(f"✅ Audio sintetizado con éxito: {out_wav}")
+        if play:
+            print("▶️ Reproduciendo por los altavoces...")
+            play_audio_file(out_wav)
+        return out_wav
+    finally:
+        release_tts_gpu_memory()
 
 
 def main():
@@ -588,6 +657,53 @@ def main():
         help="Mensaje único para ejecución directa no interactiva",
     )
     chat_parser.add_argument(
+        "--voice",
+        action="store_true",
+        help="Activa la síntesis de voz (TTS) para cada respuesta del Gemelo Digital",
+    )
+    chat_parser.add_argument(
+        "--play",
+        action="store_true",
+        help="Reproduce automáticamente por altavoces el audio sintetizado",
+    )
+    chat_parser.add_argument(
+        "--storage-dir",
+        type=str,
+        default="",
+        help="Ruta base del directorio de almacenamiento",
+    )
+
+    # Subcomando: tts
+    tts_parser = subparsers.add_parser("tts", help="Sintetiza cualquier texto con la voz clonada de un amigo")
+    tts_parser.add_argument(
+        "--user-id",
+        type=str,
+        required=True,
+        help="ID o nombre de usuario de Discord a emular (ej. 438796478035787780 o saframa)",
+    )
+    tts_parser.add_argument(
+        "--text",
+        type=str,
+        required=True,
+        help="Texto a sintetizar con la voz clonada",
+    )
+    tts_parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Ruta personalizada para guardar el archivo WAV sintetizado",
+    )
+    tts_parser.add_argument(
+        "--play",
+        action="store_true",
+        help="Reproduce el audio generado por los altavoces de inmediato",
+    )
+    tts_parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="Fuerza el modo mock local para pruebas rápidas sin ocupar la GPU",
+    )
+    tts_parser.add_argument(
         "--storage-dir",
         type=str,
         default="",
@@ -635,6 +751,18 @@ def main():
             model_name=args.model,
             mock=args.mock,
             single_turn_prompt=args.prompt,
+            enable_voice=args.voice,
+            play_audio=args.play,
+        )
+
+    elif args.command == "tts":
+        synthesize_user_voice(
+            user_id=args.user_id,
+            text=args.text,
+            base_storage_dir=base_storage,
+            output_path=args.output,
+            mock=args.mock,
+            play=args.play,
         )
 
 

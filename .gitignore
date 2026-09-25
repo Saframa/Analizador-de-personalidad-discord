@@ -39,6 +39,9 @@ storage/transcripts/*
 storage/profiles/*
 !storage/profiles/.gitkeep
 
+storage/twin_outputs/*
+!storage/twin_outputs/.gitkeep
+
 # Checkpoints y Pesos de Modelos Locales (Whisper, XTTS, F5-TTS)
 models/
 *.pt

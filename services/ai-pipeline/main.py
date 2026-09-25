@@ -726,15 +726,24 @@ def watch_sessions(
     log.info("El sistema procesará automáticamente cualquier llamada apenas termine.")
     log.info("Presiona Ctrl+C en cualquier momento para detener el vigilante.\n")
 
-    # Win32 Anti-Suspensión: evitar que Windows suspenda la CPU/GPU durante la vigilancia 24/7
-    if sys.platform == "win32":
+    # Evitar múltiples instancias concurrentes del vigilante compitiendo por la GPU
+    lock_file = os.path.join(base_storage_dir, ".watcher.pid")
+    if os.path.exists(lock_file):
         try:
-            import ctypes
-            # ES_CONTINUOUS (0x80000000) | ES_SYSTEM_REQUIRED (0x00000001)
-            ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)
-            log.info("🛡️ [Windows Power] Prevención de suspensión de energía activada (SetThreadExecutionState).")
-        except Exception as e:
-            log.warning(f"⚠️ [Windows Power] No se pudo activar SetThreadExecutionState: {e}")
+            with open(lock_file, "r") as lf:
+                old_pid = int(lf.read().strip())
+            import psutil
+            if psutil.pid_exists(old_pid):
+                log.warning(f"⚠️ [VIGILANTE] Ya hay una instancia activa (PID {old_pid}). Abortando para no duplicar uso de GPU.")
+                return
+        except Exception:
+            pass
+
+    try:
+        with open(lock_file, "w") as lf:
+            lf.write(str(os.getpid()))
+    except Exception:
+        pass
 
     try:
         while True:
@@ -810,6 +819,13 @@ def watch_sessions(
     except (KeyboardInterrupt, EOFError):
         log.info("\n🛑 Vigilante detenido por el usuario.\n")
     finally:
+        if os.path.exists(lock_file):
+            try:
+                with open(lock_file, "r") as lf:
+                    if int(lf.read().strip()) == os.getpid():
+                        os.remove(lock_file)
+            except Exception:
+                pass
         if sys.platform == "win32":
             try:
                 import ctypes

@@ -2,6 +2,7 @@
 pydantic>=2.5.0
 pytest>=8.0.0
 jsonschema>=4.20.0
+python-dotenv>=1.0.0
 
 # Pipeline de Audio y Deep Learning (Fase 2)
 # torch y torchaudio se instalan con cu124: --index-url https://download.pytorch.org/whl/cu124
@@ -11,3 +12,6 @@ pyloudnorm>=0.2.0
 scipy>=1.10.0
 soundfile>=0.12.0
 av>=11.0.0
+
+# Motor de Perfilado Psicológico y Conductual con Gemini (Fase 3)
+google-genai>=2.0.0

@@ -26,15 +26,26 @@ if CURRENT_DIR not in sys.path:
 from core.contracts.models import (
     SessionMetadata,
     SessionTranscript,
+    UserProfile,
     Utterance,
 )
 from core.curator.voice_curator import VoiceCurator
+from core.profiler.gemini_analyzer import GeminiProfiler
+from core.profiler.metrics import compute_user_metrics
+from core.profiler.profile_synthesizer import ProfileSynthesizer
 from core.stt.transcriber import WhisperTranscriber, release_gpu_memory
 from core.vad.overlap_detector import (
     extract_non_overlapping_intervals,
     find_overlapping_speakers,
 )
 from core.vad.silero import SileroVADDetector
+
+# Cargar variables de entorno (.env)
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(CURRENT_DIR, ".env"))
+load_dotenv(os.path.join(CURRENT_DIR, "..", "..", ".env"))
+load_dotenv(os.path.join(CURRENT_DIR, "..", "voice-recorder", ".env"))
 
 # Configurar stdout/stderr en UTF-8 para Windows
 if hasattr(sys.stdout, "reconfigure"):
@@ -224,11 +235,99 @@ def process_session(
     return transcript
 
 
+def profile_session(
+    session_dir: str,
+    base_storage_dir: str,
+    model_name: str = "gemini-2.5-flash",
+    mock: bool = False,
+    target_user_id: Optional[str] = None,
+) -> List[UserProfile]:
+    """
+    Ejecuta el análisis de personalidad y perfilado psicológico con Gemini API
+    para los participantes de la sesión y genera/actualiza los perfiles acumulados.
+    """
+    metadata_file = os.path.join(session_dir, "session_metadata.json")
+    transcript_file = os.path.join(session_dir, "transcript.json")
+
+    if not os.path.exists(metadata_file):
+        raise FileNotFoundError(f"session_metadata.json no existe en {session_dir}")
+    if not os.path.exists(transcript_file):
+        raise FileNotFoundError(
+            f"transcript.json no existe en {session_dir}. Ejecuta primero: python main.py process --session {os.path.basename(session_dir)}"
+        )
+
+    print("\n" + "=" * 65)
+    print(f"🧠 PERFILADO PSICOLOGICO Y CONDUCTUAL: {os.path.basename(session_dir)}")
+    print("=" * 65)
+
+    with open(metadata_file, "r", encoding="utf-8") as f:
+        metadata = SessionMetadata.model_validate_json(f.read())
+    with open(transcript_file, "r", encoding="utf-8") as f:
+        transcript = SessionTranscript.model_validate_json(f.read())
+
+    profiler = GeminiProfiler(model_name=model_name, mock=mock)
+    synthesizer = ProfileSynthesizer(storage_dir=base_storage_dir)
+    updated_profiles: List[UserProfile] = []
+
+    for participant in metadata.participants:
+        user_id = participant.user_id
+        if target_user_id and user_id != target_user_id:
+            continue
+
+        print(f"\n[ANALISIS] Evaluando a {participant.display_name} (@{participant.username})...")
+
+        # 1. Métricas cuantitativas
+        metrics = compute_user_metrics(transcript, user_id)
+        if metrics.turn_count == 0:
+            print(f"      • Sin intervenciones habladas en esta sesión. Omitiendo perfilado profundo.")
+            continue
+
+        print(f"      • Métricas: {metrics.turn_count} turnos, {metrics.total_words} palabras, "
+              f"{metrics.avg_words_per_turn:.1f} pal/turno, cadencia '{metrics.cadence}', "
+              f"interrupciones: {metrics.interruption_ratio*100:.1f}%")
+
+        # 2. Inferencia cualitativa / Gemini
+        print(f"      • Ejecutando análisis sociolingüístico y Big Five (modelo: {model_name} | mock={profiler.mock})...")
+        evaluation = profiler.analyze_user_session(transcript, user_id, participant.display_name, metrics)
+
+        # 3. Síntesis acumulada
+        profile = synthesizer.synthesize_profile(
+            user_id=user_id,
+            username=participant.username,
+            session_id=metadata.session_id,
+            session_metrics=metrics,
+            evaluation=evaluation,
+        )
+        updated_profiles.append(profile)
+
+        # 4. Reporte amigable en consola
+        bf = profile.big_five
+        print(f"      [OK] Perfil sintetizado (Sesión #{profile.total_sessions_analyzed}, {profile.total_speaking_seconds:.1f}s acumulados):")
+        print(f"         - Rol en el grupo: {profile.group_role.primary_role}")
+        print(f"         - Humor y estilo:  {profile.communication_style.humor_type}")
+        print(f"         - Big Five:")
+        print(f"           • Apertura:        {bf.openness.score:.2f} (confianza: {bf.openness.confidence:.2f})")
+        print(f"           • Responsabilidad: {bf.conscientiousness.score:.2f} (confianza: {bf.conscientiousness.confidence:.2f})")
+        print(f"           • Extraversión:    {bf.extraversion.score:.2f} (confianza: {bf.extraversion.confidence:.2f})")
+        print(f"           • Amabilidad:      {bf.agreeableness.score:.2f} (confianza: {bf.agreeableness.confidence:.2f})")
+        print(f"           • Neuroticismo:    {bf.neuroticism.score:.2f} (confianza: {bf.neuroticism.confidence:.2f})")
+        print(f"         - Jerga rioplatense: {', '.join(profile.dialect_markers.favorite_slang) or 'ninguna'}")
+        sample_cite = bf.openness.evidence_quotes[0].quote if bf.openness.evidence_quotes else 'N/A'
+        print(f"         - Cita de evidencia: \"{sample_cite}\"")
+        print(f"         - Guardado en: storage/profiles/{user_id}/profile.json")
+
+    print("\n" + "=" * 65)
+    print("🎉 PERFILADO COMPLETADO CON EXITO")
+    print("=" * 65)
+    return updated_profiles
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Orquestador STT y Curador de Voz para Discord Profiler")
+    parser = argparse.ArgumentParser(description="Orquestador STT, Curador de Voz y Perfilador de Personalidad")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    process_parser = subparsers.add_parser("process", help="Procesa una sesión grabada")
+    # Subcomando: process
+    process_parser = subparsers.add_parser("process", help="Procesa una sesión grabada (STT + Curación)")
     process_parser.add_argument(
         "--session",
         type=str,
@@ -248,6 +347,43 @@ def main():
         help="Omite la extracción de muestras limpias para clonación de voz",
     )
     process_parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Ejecuta automáticamente el perfilado de personalidad luego de la transcripción",
+    )
+    process_parser.add_argument(
+        "--storage-dir",
+        type=str,
+        default="",
+        help="Ruta base del directorio de almacenamiento",
+    )
+
+    # Subcomando: profile
+    profile_parser = subparsers.add_parser("profile", help="Analiza y perfila psicológicamente una sesión ya procesada")
+    profile_parser.add_argument(
+        "--session",
+        type=str,
+        default="latest",
+        help="ID de la sesión (ej. 2026-09-25_00-00-18) o 'latest'",
+    )
+    profile_parser.add_argument(
+        "--model",
+        type=str,
+        default="gemini-2.5-flash",
+        help="Modelo de Gemini a utilizar (ej. gemini-2.5-flash, gemini-2.5-pro)",
+    )
+    profile_parser.add_argument(
+        "--user-id",
+        type=str,
+        default=None,
+        help="Filtra el análisis para un usuario específico de Discord",
+    )
+    profile_parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="Fuerza el modo mock local/offline sin consumir cuota de API de Gemini",
+    )
+    profile_parser.add_argument(
         "--storage-dir",
         type=str,
         default="",
@@ -256,18 +392,32 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == "process":
-        # Determinar directorio base de almacenamiento (por defecto ../../storage)
-        base_storage = args.storage_dir
-        if not base_storage:
-            base_storage = os.path.abspath(os.path.join(CURRENT_DIR, "..", "..", "storage"))
+    base_storage = args.storage_dir
+    if not base_storage:
+        base_storage = os.path.abspath(os.path.join(CURRENT_DIR, "..", "..", "storage"))
 
-        session_path = resolve_session_path(args.session, base_storage)
+    session_path = resolve_session_path(args.session, base_storage)
+
+    if args.command == "process":
         process_session(
             session_dir=session_path,
             model_size=args.model_size,
             curate_samples=not args.no_clean_samples,
             base_storage_dir=base_storage,
+        )
+        if args.profile:
+            profile_session(
+                session_dir=session_path,
+                base_storage_dir=base_storage,
+            )
+
+    elif args.command == "profile":
+        profile_session(
+            session_dir=session_path,
+            base_storage_dir=base_storage,
+            model_name=args.model,
+            mock=args.mock,
+            target_user_id=args.user_id,
         )
 
 

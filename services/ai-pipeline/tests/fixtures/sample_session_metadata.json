@@ -1,0 +1,42 @@
+{
+  "version": "1.0.0",
+  "session_id": "2026-09-24_21-30-00",
+  "guild_id": "123456789012345678",
+  "channel_id": "987654321098765432",
+  "channel_name": "General - Voice",
+  "started_at": "2026-09-24T21:30:00.000Z",
+  "ended_at": "2026-09-24T22:15:00.000Z",
+  "duration_seconds": 2700.0,
+  "participants": [
+    {
+      "user_id": "111111111111111111",
+      "username": "mateo_uy",
+      "display_name": "Mateo",
+      "joined_at": "2026-09-24T21:30:00.000Z",
+      "left_at": "2026-09-24T22:15:00.000Z"
+    },
+    {
+      "user_id": "222222222222222222",
+      "username": "seba_mvd",
+      "display_name": "Seba",
+      "joined_at": "2026-09-24T21:32:00.000Z",
+      "left_at": "2026-09-24T22:15:00.000Z"
+    }
+  ],
+  "audio_files": {
+    "111111111111111111": {
+      "filename": "audio/111111111111111111.wav",
+      "sample_rate": 48000,
+      "channels": 1,
+      "format": "wav",
+      "size_bytes": 25920000
+    },
+    "222222222222222222": {
+      "filename": "audio/222222222222222222.wav",
+      "sample_rate": 48000,
+      "channels": 1,
+      "format": "wav",
+      "size_bytes": 24800000
+    }
+  }
+}

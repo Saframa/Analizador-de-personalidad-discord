@@ -1,0 +1,85 @@
+{
+  "version": "1.0.0",
+  "user_id": "111111111111111111",
+  "username": "mateo_uy",
+  "last_updated": "2026-09-24T22:25:00.000Z",
+  "total_sessions_analyzed": 5,
+  "total_speaking_seconds": 1845.5,
+  "big_five": {
+    "openness": {
+      "score": 0.75,
+      "confidence": 0.88,
+      "evidence_quotes": [
+        {
+          "quote": "Che y si probamos armar la infraestructura con containers en vez de VMs?",
+          "session_id": "2026-09-20_20-15-00",
+          "timestamp": "00:14:32"
+        }
+      ]
+    },
+    "conscientiousness": {
+      "score": 0.62,
+      "confidence": 0.82,
+      "evidence_quotes": [
+        {
+          "quote": "Pará que anoto esto en el Notion así no nos olvidamos mañana temprano.",
+          "session_id": "2026-09-21_21-00-00",
+          "timestamp": "00:45:10"
+        }
+      ]
+    },
+    "extraversion": {
+      "score": 0.85,
+      "confidence": 0.94,
+      "evidence_quotes": [
+        {
+          "quote": "Bo, salado como estuvo la juntada, hay que meter otra el viernes posta!",
+          "session_id": "2026-09-24_21-30-00",
+          "timestamp": "00:05:12"
+        }
+      ]
+    },
+    "agreeableness": {
+      "score": 0.78,
+      "confidence": 0.90,
+      "evidence_quotes": [
+        {
+          "quote": "Ta bien fiera, te entiendo, si precisás una mano con eso decime.",
+          "session_id": "2026-09-24_21-30-00",
+          "timestamp": "00:22:45"
+        }
+      ]
+    },
+    "neuroticism": {
+      "score": 0.35,
+      "confidence": 0.85,
+      "evidence_quotes": [
+        {
+          "quote": "Tranqui bo, no pasa nada, se arregla en dos minutos.",
+          "session_id": "2026-09-22_19-30-00",
+          "timestamp": "00:30:15"
+        }
+      ]
+    }
+  },
+  "communication_style": {
+    "avg_words_per_turn": 14.5,
+    "cadence": "rapido",
+    "interruption_ratio": 0.12,
+    "humor_type": "Chicanas afectuosas, ironía sutil y bromas situacionales cotidianas"
+  },
+  "group_role": {
+    "primary_role": "El Catalizador Social y Pragmático",
+    "description": "Inicia conversaciones, mantiene la energía del grupo alta y propone soluciones prácticas cuando se traba un debate.",
+    "conflict_style": "Desactiva tensiones apelando al humor o relativizando la gravedad del problema."
+  },
+  "dialect_markers": {
+    "rioplatense_frequency": 0.82,
+    "favorite_slang": ["bo", "ta", "salado", "de menos", "fiera", "posta"],
+    "discourse_fillers": ["ta", "bo", "mirá", "pará"]
+  },
+  "clean_voice_samples": [
+    "storage/clean_samples/111111111111111111/sample_01.wav",
+    "storage/clean_samples/111111111111111111/sample_02.wav"
+  ]
+}

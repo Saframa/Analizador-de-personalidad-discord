@@ -1,0 +1,44 @@
+{
+  "version": "1.0.0",
+  "session_id": "2026-09-24_21-30-00",
+  "processed_at": "2026-09-24T22:20:00.000Z",
+  "model": "faster-whisper-large-v3",
+  "utterances": [
+    {
+      "id": 1,
+      "user_id": "111111111111111111",
+      "username": "mateo_uy",
+      "start_time": 12.5,
+      "end_time": 16.2,
+      "duration": 3.7,
+      "text": "Bo, no sabés lo que me pasó hoy en el laburo, un estrés salado.",
+      "confidence": 0.96,
+      "audio_segment_path": "segments/111111111111111111_001.wav",
+      "overlapping_speakers": []
+    },
+    {
+      "id": 2,
+      "user_id": "222222222222222222",
+      "username": "seba_mvd",
+      "start_time": 16.8,
+      "end_time": 20.1,
+      "duration": 3.3,
+      "text": "Qué pasó fiera? No me digas que se cayó la base de datos de nuevo.",
+      "confidence": 0.94,
+      "audio_segment_path": "segments/222222222222222222_001.wav",
+      "overlapping_speakers": []
+    },
+    {
+      "id": 3,
+      "user_id": "111111111111111111",
+      "username": "mateo_uy",
+      "start_time": 20.4,
+      "end_time": 24.0,
+      "duration": 3.6,
+      "text": "Ta, ni me hagas acordar. De menos todo el día reiniciando servidores.",
+      "confidence": 0.95,
+      "audio_segment_path": "segments/111111111111111111_002.wav",
+      "overlapping_speakers": []
+    }
+  ]
+}

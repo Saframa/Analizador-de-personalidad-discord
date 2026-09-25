@@ -1,0 +1,189 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "UserProfile",
+  "description": "Contrato formal de perfil psicológico, conductual y dialectal emitido por ai-pipeline/core/profiler",
+  "type": "object",
+  "required": [
+    "version",
+    "user_id",
+    "username",
+    "last_updated",
+    "total_sessions_analyzed",
+    "big_five",
+    "communication_style",
+    "group_role",
+    "dialect_markers"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "enum": ["1.0.0"],
+      "description": "Versión semántica del contrato de datos"
+    },
+    "user_id": {
+      "type": "string",
+      "description": "ID de usuario de Discord"
+    },
+    "username": {
+      "type": "string",
+      "description": "Nombre de usuario de Discord"
+    },
+    "last_updated": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp ISO 8601 de la última actualización del perfil"
+    },
+    "total_sessions_analyzed": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Cantidad acumulada de sesiones analizadas para este usuario"
+    },
+    "total_speaking_seconds": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Total acumulado de segundos que el usuario ha hablado"
+    },
+    "big_five": {
+      "type": "object",
+      "description": "Evaluación cuantitativa del modelo de los Cinco Grandes (Big Five)",
+      "required": [
+        "openness",
+        "conscientiousness",
+        "extraversion",
+        "agreeableness",
+        "neuroticism"
+      ],
+      "properties": {
+        "openness": { "$ref": "#/definitions/TraitEvaluation" },
+        "conscientiousness": { "$ref": "#/definitions/TraitEvaluation" },
+        "extraversion": { "$ref": "#/definitions/TraitEvaluation" },
+        "agreeableness": { "$ref": "#/definitions/TraitEvaluation" },
+        "neuroticism": { "$ref": "#/definitions/TraitEvaluation" }
+      }
+    },
+    "communication_style": {
+      "type": "object",
+      "description": "Métricas cuantitativas y cualitativas de la dinámica conversacional",
+      "required": [
+        "avg_words_per_turn",
+        "cadence",
+        "interruption_ratio",
+        "humor_type"
+      ],
+      "properties": {
+        "avg_words_per_turn": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Promedio de palabras por turno de habla"
+        },
+        "cadence": {
+          "type": "string",
+          "enum": ["rapido", "pausado", "irregular", "moderado"],
+          "description": "Ritmo de locución predominante"
+        },
+        "interruption_ratio": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Proporción de veces que interrumpe o pisa a otros interlocutores"
+        },
+        "humor_type": {
+          "type": "string",
+          "description": "Descripción del tipo de humor (ej. irónico, absurdo, chicanas afectuosas, observacional)"
+        }
+      }
+    },
+    "group_role": {
+      "type": "object",
+      "description": "Posicionamiento y rol dinámico dentro del grupo",
+      "required": [
+        "primary_role",
+        "description",
+        "conflict_style"
+      ],
+      "properties": {
+        "primary_role": {
+          "type": "string",
+          "description": "Rol arquetípico (ej. 'El Conciliador', 'El Instigador Cómico', 'El Escéptico')"
+        },
+        "description": {
+          "type": "string",
+          "description": "Explicación detallada de cómo se desenvuelve en el grupo"
+        },
+        "conflict_style": {
+          "type": "string",
+          "description": "Modo de reacción ante desacuerdos o debates (ej. evade, confronta con humor, argumenta lógico)"
+        }
+      }
+    },
+    "dialect_markers": {
+      "type": "object",
+      "description": "Marcadores sociolectales del dialecto uruguayo / rioplatense",
+      "required": [
+        "rioplatense_frequency",
+        "favorite_slang",
+        "discourse_fillers"
+      ],
+      "properties": {
+        "rioplatense_frequency": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Densidad de modismos rioplatenses por intervención (0.0 a 1.0)"
+        },
+        "favorite_slang": {
+          "type": "array",
+          "description": "Palabras o giros lingüísticos preferidos (ej. ['salado', 'bo', 'ta de vivo', 'de menos'])",
+          "items": { "type": "string" }
+        },
+        "discourse_fillers": {
+          "type": "array",
+          "description": "Muletillas de inicio o cierre (ej. ['ta', 'bo', 'mirá', 'pará'])",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "clean_voice_samples": {
+      "type": "array",
+      "description": "Rutas relativas a las mejores muestras de audio limpias disponibles para clonación de voz",
+      "items": { "type": "string" }
+    }
+  },
+  "definitions": {
+    "TraitEvaluation": {
+      "type": "object",
+      "required": [
+        "score",
+        "confidence",
+        "evidence_quotes"
+      ],
+      "properties": {
+        "score": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Puntaje normalizado de 0.0 (muy bajo) a 1.0 (muy alto)"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Nivel de certeza estadística según cantidad de evidencia"
+        },
+        "evidence_quotes": {
+          "type": "array",
+          "description": "Citas textuales exactas que justifican el puntaje (protocolo anti-alucinaciones)",
+          "items": {
+            "type": "object",
+            "required": ["quote", "session_id", "timestamp"],
+            "properties": {
+              "quote": { "type": "string" },
+              "session_id": { "type": "string" },
+              "timestamp": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

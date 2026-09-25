@@ -1,0 +1,101 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SessionTranscript",
+  "description": "Contrato formal de transcripción cronológica sincronizada multi-hablante emitido por ai-pipeline/core/stt",
+  "type": "object",
+  "required": [
+    "version",
+    "session_id",
+    "processed_at",
+    "model",
+    "utterances"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "enum": ["1.0.0"],
+      "description": "Versión semántica del contrato de datos"
+    },
+    "session_id": {
+      "type": "string",
+      "description": "ID de la sesión de origen asociada"
+    },
+    "processed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp ISO 8601 del procesamiento de transcripción"
+    },
+    "model": {
+      "type": "string",
+      "description": "Identificador del modelo STT utilizado (ej. faster-whisper-large-v3)"
+    },
+    "utterances": {
+      "type": "array",
+      "description": "Lista secuencial y cronológicamente ordenada de intervenciones",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "username",
+          "start_time",
+          "end_time",
+          "duration",
+          "text",
+          "confidence"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Identificador incremental de la intervención en la sesión"
+          },
+          "user_id": {
+            "type": "string",
+            "description": "ID de Discord del emisor"
+          },
+          "username": {
+            "type": "string",
+            "description": "Nombre de usuario del emisor"
+          },
+          "start_time": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Segundo de inicio relativo al inicio de la sesión"
+          },
+          "end_time": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Segundo de finalización relativo al inicio de la sesión"
+          },
+          "duration": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Duración de la intervención en segundos"
+          },
+          "text": {
+            "type": "string",
+            "description": "Texto transcrito de la intervención"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Puntuación de confianza del modelo de 0.0 a 1.0"
+          },
+          "audio_segment_path": {
+            "type": ["string", "null"],
+            "description": "Ruta relativa opcional al recorte WAV de esta intervención específica"
+          },
+          "overlapping_speakers": {
+            "type": "array",
+            "description": "Lista de IDs de otros usuarios que hablaron simultáneamente durante esta frase",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

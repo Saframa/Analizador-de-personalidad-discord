@@ -1,0 +1,134 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SessionMetadata",
+  "description": "Contrato formal de metadatos de sesión de grabación emitido por voice-recorder",
+  "type": "object",
+  "required": [
+    "version",
+    "session_id",
+    "guild_id",
+    "channel_id",
+    "channel_name",
+    "started_at",
+    "ended_at",
+    "duration_seconds",
+    "participants",
+    "audio_files"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "enum": ["1.0.0"],
+      "description": "Versión semántica del contrato de datos"
+    },
+    "session_id": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}$",
+      "description": "Identificador único de sesión en formato YYYY-MM-DD_HH-mm-ss"
+    },
+    "guild_id": {
+      "type": "string",
+      "description": "ID del servidor de Discord"
+    },
+    "channel_id": {
+      "type": "string",
+      "description": "ID del canal de voz"
+    },
+    "channel_name": {
+      "type": "string",
+      "description": "Nombre legible del canal de voz"
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp ISO 8601 del inicio de la grabación"
+    },
+    "ended_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp ISO 8601 del cierre de la grabación"
+    },
+    "duration_seconds": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Duración total de la sesión en segundos"
+    },
+    "participants": {
+      "type": "array",
+      "description": "Lista de usuarios presentes durante la sesión",
+      "items": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "username",
+          "display_name",
+          "joined_at"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "description": "ID único de usuario de Discord"
+          },
+          "username": {
+            "type": "string",
+            "description": "Nombre de usuario único de Discord"
+          },
+          "display_name": {
+            "type": "string",
+            "description": "Apodo o nombre visible en el servidor"
+          },
+          "joined_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Timestamp ISO 8601 de ingreso al canal"
+          },
+          "left_at": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "Timestamp ISO 8601 de salida del canal o null si estuvo hasta el final"
+          }
+        }
+      }
+    },
+    "audio_files": {
+      "type": "object",
+      "description": "Mapeo de user_id a los metadatos de su archivo de audio grabado",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "filename",
+          "sample_rate",
+          "channels",
+          "format",
+          "size_bytes"
+        ],
+        "properties": {
+          "filename": {
+            "type": "string",
+            "description": "Ruta relativa del archivo de audio"
+          },
+          "sample_rate": {
+            "type": "integer",
+            "enum": [48000],
+            "description": "Frecuencia de muestreo estándar de Discord en Hz"
+          },
+          "channels": {
+            "type": "integer",
+            "enum": [1, 2],
+            "description": "1 para Mono, 2 para Estéreo"
+          },
+          "format": {
+            "type": "string",
+            "enum": ["pcm_s16le", "wav"],
+            "description": "Formato de codificación de audio"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Tamaño del archivo en bytes"
+          }
+        }
+      }
+    }
+  }
+}

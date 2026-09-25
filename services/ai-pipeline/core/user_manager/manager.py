@@ -8,7 +8,7 @@ import glob
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.contracts.models import (
     BigFiveTraits,
@@ -227,3 +227,35 @@ class UserManager:
                 }
             )
         return summary
+
+    def get_top_vocabulary(
+        self,
+        identifier: str,
+        top: int = 30,
+        filter_stopwords: bool = False,
+    ) -> List[Tuple[str, int]]:
+        """Obtiene el ranking de las palabras más frecuentes del diccionario léxico de un usuario."""
+        user = self.get_user(identifier)
+        if not user:
+            raise FileNotFoundError(f"Usuario con identificador '{identifier}' no encontrado.")
+
+        vocab = getattr(user.dialect_markers, "vocabulary_frequencies", {}) or {}
+        if not vocab:
+            return []
+
+        # Stopwords opcionales en español rioplatense para filtrar conectores genéricos
+        STOPWORDS = {
+            "el", "la", "los", "las", "un", "una", "unos", "unas", "de", "del", "a", "al", "en",
+            "con", "por", "para", "que", "qué", "y", "o", "u", "e", "pero", "si", "sí", "no",
+            "se", "te", "me", "le", "les", "lo", "los", "mi", "tu", "su", "es", "son", "era",
+            "fue", "ha", "han", "hay", "esto", "este", "esta", "estos", "estas", "eso", "esa",
+            "esos", "esas", "aquel", "aquella", "como", "cómo", "ya", "muy", "más", "menos",
+            "tan", "tanto", "todo", "toda", "todos", "todas", "él", "ella", "ellos", "ellas",
+            "este", "éste", "estos", "éstos", "esta", "ésta", "estas", "éstas"
+        }
+
+        items = list(vocab.items())
+        if filter_stopwords:
+            items = [(w, c) for w, c in items if w.lower().strip() not in STOPWORDS]
+
+        return sorted(items, key=lambda x: x[1], reverse=True)[:top]

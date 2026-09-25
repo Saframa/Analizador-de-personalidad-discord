@@ -923,6 +923,80 @@ def handle_user_command(args, base_storage_dir: str):
             print(f"   • Notas: {', '.join(profile.notes)}")
         print()
 
+    elif args.user_action in ("vocab", "words", "dictionary"):
+        display_user_vocabulary(
+            user_mgr=user_mgr,
+            user_id=getattr(args, "user_id", None),
+            top=getattr(args, "top", 30),
+            filter_stopwords=getattr(args, "filter_stopwords", False),
+        )
+
+
+def display_user_vocabulary(
+    user_mgr: UserManager,
+    user_id: Optional[str] = None,
+    top: int = 30,
+    filter_stopwords: bool = False,
+):
+    """Muestra el ranking de palabras más usadas para uno o todos los usuarios."""
+    if user_id:
+        user = user_mgr.get_user(user_id)
+        if not user:
+            print(f"\n❌ Usuario '{user_id}' no encontrado.")
+            return
+        target_users = [user]
+    else:
+        target_users = user_mgr.list_users()
+
+    # Filtrar usuarios que tengan palabras en su diccionario
+    active_users = [
+        u for u in target_users
+        if u and getattr(u.dialect_markers, "vocabulary_frequencies", {})
+    ]
+
+    if not active_users:
+        print("\n📭 No hay usuarios con diccionarios de palabras generados aún.")
+        return
+
+    filter_label = " (filtrando conectores/stopwords)" if filter_stopwords else ""
+    for user in active_users:
+        words = user_mgr.get_top_vocabulary(user.user_id, top=top, filter_stopwords=filter_stopwords)
+        total_unique = len(getattr(user.dialect_markers, "vocabulary_frequencies", {}) or {})
+        total_tokens = sum((getattr(user.dialect_markers, "vocabulary_frequencies", {}) or {}).values())
+
+        name = user.display_name or user.username
+        print("\n" + "=" * 70)
+        print(f"📖 DICCIONARIO LÉXICO: {name} (@{user.username})")
+        print(f"   • Palabras únicas: {total_unique} | Total palabras habladas: {total_tokens}")
+        print(f"   • Top {len(words)} palabras más frecuentes{filter_label}:")
+        print("=" * 70)
+
+        if not words:
+            print("   (No hay palabras para mostrar con los filtros aplicados)")
+            print("=" * 70)
+            continue
+
+        half = (len(words) + 1) // 2
+        col1 = words[:half]
+        col2 = words[half:]
+
+        print(f"{'#':<4} {'PALABRA':<18} {'CANT':<6} │ {'#':<4} {'PALABRA':<18} {'CANT':<6}")
+        print("-" * 70)
+        for i in range(half):
+            rank1 = i + 1
+            w1, c1 = col1[i]
+            str_col1 = f"{rank1:<4} {w1:<18} {c1:<6}"
+
+            if i < len(col2):
+                rank2 = half + i + 1
+                w2, c2 = col2[i]
+                str_col2 = f"│ {rank2:<4} {w2:<18} {c2:<6}"
+            else:
+                str_col2 = "│"
+            print(f"{str_col1} {str_col2}")
+        print("=" * 70)
+    print()
+
 
 def handle_context_command(args, base_storage_dir: str):
     """Maneja el subcomando context para reconstruir y mostrar hilos conversacionales."""
@@ -1175,6 +1249,13 @@ def main():
     user_update_parser.add_argument("--role", type=str, default=None, help="Nuevo rol en el grupo")
     user_update_parser.add_argument("--humor", type=str, default=None, help="Nuevo estilo de humor")
     user_update_parser.add_argument("--storage-dir", type=str, default="", help="Ruta base del directorio de almacenamiento")
+
+    # user vocab / dictionary
+    user_vocab_parser = user_subparsers.add_parser("vocab", aliases=["words", "dictionary"], help="Muestra las palabras más frecuentes del diccionario léxico de los usuarios")
+    user_vocab_parser.add_argument("--user-id", type=str, default=None, help="ID, username o apodo del usuario (si se omite, muestra todos)")
+    user_vocab_parser.add_argument("--top", type=int, default=30, help="Cantidad de palabras más usadas a mostrar (por defecto 30)")
+    user_vocab_parser.add_argument("--filter-stopwords", action="store_true", default=False, help="Filtra conectores y artículos comunes para ver palabras clave")
+    user_vocab_parser.add_argument("--storage-dir", type=str, default="", help="Ruta base del directorio de almacenamiento")
 
     # Subcomando: context
     context_parser = subparsers.add_parser("context", help="Reconstruye y visualiza hilos conversacionales y árboles de respuesta (0 tokens)")

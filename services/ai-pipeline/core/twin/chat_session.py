@@ -12,7 +12,12 @@ import time
 from typing import Dict, List, Optional
 
 from core.contracts.models import UserProfile
-from core.twin.compiler import calculate_twin_temperature, compile_twin_prompt
+from core.twin.compiler import (
+    calculate_twin_temperature,
+    compile_twin_prompt,
+    extract_corpus_dialogues,
+    extract_corpus_verbatim_quotes,
+)
 from core.twin.llama_client import LlamaClient
 
 
@@ -22,6 +27,8 @@ class DigitalTwinChat:
         profile: UserProfile,
         system_prompt: Optional[str] = None,
         few_shot_dialogues: Optional[List[Dict[str, str]]] = None,
+        verbatim_quotes: Optional[List[str]] = None,
+        base_storage_dir: Optional[str] = None,
         model_name: Optional[str] = None,
         api_key: Optional[str] = None,
         mock: bool = False,
@@ -29,7 +36,25 @@ class DigitalTwinChat:
         llama_client: Optional[LlamaClient] = None,
     ):
         self.profile = profile
-        self.system_prompt = system_prompt or compile_twin_prompt(profile, few_shot_dialogues)
+        self.base_storage_dir = base_storage_dir
+
+        # Si no se proveyeron diálogos explícitos pero sí directorio de storage,
+        # extraer automáticamente el corpus completo de audios grabados por el bot
+        if few_shot_dialogues is None and self.base_storage_dir:
+            few_shot_dialogues = extract_corpus_dialogues(
+                self.base_storage_dir, self.profile.user_id, max_dialogues=15
+            )
+
+        if verbatim_quotes is None and self.base_storage_dir:
+            verbatim_quotes = extract_corpus_verbatim_quotes(
+                self.base_storage_dir, self.profile.user_id, max_quotes=10
+            )
+
+        self.few_shot_dialogues = few_shot_dialogues
+        self.verbatim_quotes = verbatim_quotes
+        self.system_prompt = system_prompt or compile_twin_prompt(
+            profile, few_shot_dialogues=few_shot_dialogues, verbatim_quotes=verbatim_quotes
+        )
         self.temperature = calculate_twin_temperature(profile)
         self.model_name = model_name or os.getenv("GEMINI_MODEL", "gemini-flash-latest")
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")

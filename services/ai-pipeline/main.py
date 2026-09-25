@@ -45,7 +45,12 @@ from core.stt.transcriber import WhisperTranscriber, release_gpu_memory
 from core.tts.cloner import get_voice_cloner, release_tts_gpu_memory
 from core.tts.player import play_audio_file
 from core.twin.chat_session import DigitalTwinChat
-from core.twin.compiler import compile_twin_prompt, extract_few_shot_dialogues
+from core.twin.compiler import (
+    compile_twin_prompt,
+    extract_few_shot_dialogues,
+    extract_corpus_dialogues,
+    extract_corpus_verbatim_quotes,
+)
 from core.vad.overlap_detector import (
     extract_non_overlapping_intervals,
     find_overlapping_speakers,
@@ -566,24 +571,15 @@ def interactive_chat(
         except Exception:
             selected_profile = profiles[0]
 
-    # Extraer diálogos reales few-shot de las sesiones guardadas
-    few_shots = []
-    raw_sessions_dir = os.path.join(base_storage_dir, "raw_sessions")
-    if os.path.exists(raw_sessions_dir):
-        for t_file in glob.glob(os.path.join(raw_sessions_dir, "*", "transcript.json")):
-            try:
-                with open(t_file, "r", encoding="utf-8") as f:
-                    t_obj = SessionTranscript.model_validate_json(f.read())
-                    pairs = extract_few_shot_dialogues(t_obj, selected_profile.user_id, max_pairs=3)
-                    few_shots.extend(pairs)
-                    if len(few_shots) >= 5:
-                        break
-            except Exception:
-                pass
+    # Extraer corpus completo de diálogos auténticos y frases textuales de las llamadas
+    few_shots = extract_corpus_dialogues(base_storage_dir, selected_profile.user_id, max_dialogues=15)
+    verbatim_quotes = extract_corpus_verbatim_quotes(base_storage_dir, selected_profile.user_id, max_quotes=10)
 
     chat = DigitalTwinChat(
         profile=selected_profile,
         few_shot_dialogues=few_shots,
+        verbatim_quotes=verbatim_quotes,
+        base_storage_dir=base_storage_dir,
         model_name=model_name,
         backend=backend,
         mock=mock,

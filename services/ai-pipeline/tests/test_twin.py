@@ -33,6 +33,8 @@ from core.twin.compiler import (
     calculate_twin_temperature,
     compile_twin_prompt,
     extract_few_shot_dialogues,
+    extract_corpus_dialogues,
+    extract_corpus_verbatim_quotes,
 )
 from core.twin.chat_session import DigitalTwinChat
 
@@ -275,5 +277,60 @@ def test_compile_twin_prompt_with_idiolect_vocabulary(mock_profile):
     assert '- "bo" (dicha 35 veces)' in prompt
     assert '- "posta" (dicha 20 veces)' in prompt
     assert '- "literal" (dicha 15 veces)' in prompt
+
+
+def test_compile_twin_prompt_calibrated_against_caricature(mock_profile):
+    """Verifica que el prompt compilado incluya las restricciones anti-caricatura y memoria pasiva."""
+    profile = mock_profile.model_copy()
+    profile.notes = ["es un otaku jugador de juegos indie y anime nicho"]
+
+    # Diccionario realista donde el usuario dice 'boludo' pero nunca dijo 'flama' ni 'salado'
+    profile.dialect_markers.vocabulary_frequencies = {
+        "no": 100, "si": 50, "que": 45, "de": 40, "la": 35,
+        "boludo": 25, "bueno": 20, "o": 18, "sea": 18, "esto": 15,
+        "ya": 12, "esta": 10, "vamo": 8, "aca": 8, "bien": 7,
+        "como": 6, "para": 5, "te": 5, "lo": 5, "un": 5, "una": 5
+    }
+
+    prompt = compile_twin_prompt(profile)
+
+    # 1. Fuente de verdad: grabaciones reales
+    assert "TU FUENTE DE VERDAD: TUS GRABACIONES REALES DE VOZ EN DISCORD" in prompt
+
+    # 2. Reglas anti-caricatura y anti-abuso de modismos
+    assert "CALIBRACIÓN DE LENGUAJE (ANTI-CARICATURA)" in prompt
+    assert "NUNCA abuses de modismos" in prompt
+    assert "NO empieces cada mensaje con \"¡Ta, boludo!\"" in prompt
+
+    # 3. Memoria pasiva de notas manuales (no forzar)
+    assert "MEMORIA PASIVA Y DATOS DE FONDO" in prompt
+    assert "NUNCA menciones estas notas por iniciativa propia" in prompt
+    assert "es un otaku jugador de juegos indie y anime nicho" in prompt
+
+    # 4. Modismos no dichos en el registro real deben ser filtrados
+    # 'flama' y 'salado' tenían 0 en vocabulary_frequencies, por lo que no deben ser listados como expresiones favoritas
+    assert "Tus expresiones y modismos favoritos: boludo" in prompt or "boludo" in prompt
+
+
+def test_digital_twin_chat_auto_corpus_loading(tmp_path, mock_profile, mock_transcript):
+    """Verifica que DigitalTwinChat auto-cargue diálogos reales desde el storage si no se especifican."""
+    # Crear estructura temporal de sesiones
+    session_dir = tmp_path / "raw_sessions" / mock_transcript.session_id
+    session_dir.mkdir(parents=True)
+    transcript_file = session_dir / "transcript.json"
+    transcript_file.write_text(mock_transcript.model_dump_json(), encoding="utf-8")
+
+    chat = DigitalTwinChat(
+        profile=mock_profile,
+        base_storage_dir=str(tmp_path),
+        mock=True,
+    )
+
+    # Debe haber auto-cargado el diálogo del transcript
+    assert chat.few_shot_dialogues is not None
+    assert len(chat.few_shot_dialogues) >= 1
+    assert "bot" in chat.few_shot_dialogues[0]["context"]
+    assert "flama" in chat.few_shot_dialogues[0]["reply"]
+
 
 

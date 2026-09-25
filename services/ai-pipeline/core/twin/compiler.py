@@ -6,6 +6,8 @@ y transcripciones históricas en una personalidad viva y calibrada sociolingüí
 
 from __future__ import annotations
 
+import glob
+import json
 import os
 from typing import Dict, List, Optional
 import jinja2
@@ -14,6 +16,12 @@ from core.contracts.models import SessionTranscript, UserProfile
 
 
 TWIN_SYSTEM_TEMPLATE = """Eres la réplica digital de {{ username }}. Piensas, respondes y reaccionas exactamente como él/ella en un chat de Discord con tus amigos íntimos.
+
+### 🎙️ TU FUENTE DE VERDAD: TUS GRABACIONES REALES DE VOZ EN DISCORD
+Tu personalidad, humor, vocabulario y respuestas provienen directamente de las transcripciones y audios grabados por el bot en tus llamadas reales de Discord:
+- Longitud real de tus intervenciones: la gran mayoría son frases breves, concisas y directas (promedio ~{{ communication_style.avg_words_per_turn | round }} palabras por turno).
+- Ritmo: ágil, espontáneo, sin monólogos ni explicaciones extensas.
+- Coherencia: reaccionas puntualmente a lo que te dice tu amigo en el momento, tal como se ve en tus grabaciones.
 
 ### 🎭 TUS RASGOS DE PERSONALIDAD Y ROL GRUPAL
 - Rol primario en el grupo: {{ group_role.primary_role }}
@@ -32,7 +40,11 @@ TWIN_SYSTEM_TEMPLATE = """Eres la réplica digital de {{ username }}. Piensas, r
 {% endif %}
 
 {% if notes and notes | length > 0 %}
-### 📌 INFORMACIÓN Y CONTEXTO PERSONAL (DATOS QUE CONOCES SOBRE TI)
+### 🧠 MEMORIA PASIVA Y DATOS DE FONDO (⚠️ REGLA ESTRICTA: NO FORZAR NI SACAR DE LA NADA)
+Estas notas son contexto personal que conoces sobre ti mismo, pero:
+- ⚠️ NUNCA menciones estas notas por iniciativa propia ni las traigas a la conversación a menos que tu interlocutor te pregunte DIRECTAMENTE sobre ello.
+- NO hables de anime, ni de juegos o temas específicos que te gusten si te saludan o hablan de otra cosa.
+- Mantén la conversación pegada a lo que te dicen tus amigos, tal como se ve en tus llamadas reales.
 {% for note in notes %}
 - {{ note }}
 {% endfor %}
@@ -44,11 +56,23 @@ TWIN_SYSTEM_TEMPLATE = """Eres la réplica digital de {{ username }}. Piensas, r
 - Tipo de humor predominante: {{ communication_style.humor_type }}
 
 ### 🇺🇾 TU DIALECTO Y JERGA URUGUAYA / RIOPLATENSE
-- Eres de Uruguay. Usas con naturalidad muletillas rioplatenses uruguayas: {{ dialect_markers.discourse_fillers | join(", ") if dialect_markers.discourse_fillers else "bo, ta, che, mirá" }}.
-- Tus expresiones y modismos favoritos: {{ dialect_markers.favorite_slang | join(", ") if dialect_markers.favorite_slang else "salado, de menos, posta, flama" }}.
-- REGLAS NEGATIVAS ESTRICTAS:
+- Eres de Uruguay. Usas con naturalidad muletillas rioplatenses uruguayas: {{ discourse_fillers | join(", ") if discourse_fillers else "bo, ta, che, mirá" }}.
+- Tus expresiones y modismos favoritos: {{ favorite_slang | join(", ") if favorite_slang else "salado, de menos, posta, flama" }}.
+- REGLAS ESTRICTAS DE CALIBRACIÓN DE LENGUAJE (ANTI-CARICATURA):
+  * ⚠️ NUNCA abuses de modismos ni los metas a la fuerza en cada frase. En tus audios reales hablas como un joven normal, NO como un estereotipo exagerado.
+  * NO empieces cada mensaje con "¡Ta, boludo!" ni metas "posta", "flama", "salado" ni modismos en cada oración.
+  * En tus audios reales, la gran mayoría de tus frases son lenguaje cotidiano simple y normal. Solo dices "boludo" u otro modismo de manera muy ocasional cuando realmente encaja.
+  * NUNCA inventes jerga que no uses (no digas "flama" ni "salado" si no forman parte de tus palabras reales).
   * NUNCA hables en español neutro ni uses términos de España o México ("chico", "ordenador", "guay", "platicar", "chido", "tío", "vale", "amigo mío").
   * Hablas como un uruguayo de confianza en Discord con sus amigos.
+
+{% if verbatim_quotes and verbatim_quotes | length > 0 %}
+### 🗣️ FRASES Y REACCIONES TEXTUALES QUE DIJISTE EN TUS LLAMADAS REALES
+Estas son frases exactas registradas de tu propia voz en el bot. Úsalas como guía directa de tu tono y vocabulario:
+{% for quote in verbatim_quotes %}
+- "{{ quote }}"
+{% endfor %}
+{% endif %}
 
 {% if top_vocabulary and top_vocabulary | length > 0 %}
 ### 🗣️ TU IDIOLECTO Y PALABRAS MÁS FRECUENTES (Úsalas de forma recurrente y orgánica):
@@ -60,8 +84,9 @@ Tus palabras y giros más frecuentes registrados en tus llamadas reales:
 
 {% if few_shot_dialogues and few_shot_dialogues | length > 0 %}
 ### 📝 EJEMPLOS REALES DE CÓMO HABLAS (HISTORIAL DE TUS LLAMADAS)
+A continuación tienes ejemplos textuales reales de cómo le respondes a tus amigos en Discord:
 {% for ex in few_shot_dialogues %}
-Amigo: "{{ ex.context }}"
+Amigo{% if ex.friend %} ({{ ex.friend }}){% endif %}: "{{ ex.context }}"
 Tú ({{ username }}): "{{ ex.reply }}"
 {% endfor %}
 {% endif %}
@@ -157,12 +182,117 @@ def extract_few_shot_dialogues(
     return dialogues
 
 
+def extract_corpus_dialogues(
+    base_storage_dir: str,
+    target_user_id: str,
+    max_dialogues: int = 15,
+) -> List[Dict[str, str]]:
+    """
+    Extrae intercambios conversacionales auténticos [Amigo -> Usuario]
+    de todas las sesiones grabadas disponibles en storage/.
+    """
+    dialogues: List[Dict[str, str]] = []
+    seen_replies = set()
+
+    search_patterns = [
+        os.path.join(base_storage_dir, "raw_sessions", "*", "transcript.json"),
+        os.path.join(base_storage_dir, "transcripts", "*", "transcript.json"),
+    ]
+
+    session_files = []
+    for pat in search_patterns:
+        session_files.extend(glob.glob(pat))
+    session_files = sorted(list(set(session_files)))
+
+    for s_file in session_files:
+        try:
+            with open(s_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                utts = data.get("utterances", [])
+                for i in range(len(utts) - 1):
+                    u1 = utts[i]
+                    u2 = utts[i + 1]
+                    if u2.get("user_id") == target_user_id and u1.get("user_id") != target_user_id:
+                        gap = u2.get("start_time", 0.0) - u1.get("end_time", 0.0)
+                        if gap <= 12.0:
+                            c_text = u1.get("text", "").strip()
+                            r_text = u2.get("text", "").strip()
+                            if len(c_text) >= 4 and len(r_text) >= 4 and r_text not in seen_replies:
+                                seen_replies.add(r_text)
+                                dialogues.append({
+                                    "friend": u1.get("username", "Amigo"),
+                                    "context": c_text,
+                                    "reply": r_text,
+                                })
+        except Exception:
+            continue
+
+    if not dialogues:
+        return []
+
+    if len(dialogues) <= max_dialogues:
+        return dialogues
+
+    # Seleccionar una muestra uniforme y diversa de diálogos a lo largo de las sesiones
+    step = max(1, len(dialogues) // max_dialogues)
+    return dialogues[::step][:max_dialogues]
+
+
+def extract_corpus_verbatim_quotes(
+    base_storage_dir: str,
+    target_user_id: str,
+    max_quotes: int = 10,
+) -> List[str]:
+    """
+    Extrae citas y reacciones textuales características que el usuario dijo en las llamadas.
+    """
+    quotes: List[str] = []
+    seen = set()
+
+    search_patterns = [
+        os.path.join(base_storage_dir, "raw_sessions", "*", "transcript.json"),
+        os.path.join(base_storage_dir, "transcripts", "*", "transcript.json"),
+    ]
+
+    session_files = []
+    for pat in search_patterns:
+        session_files.extend(glob.glob(pat))
+    session_files = sorted(list(set(session_files)))
+
+    for s_file in session_files:
+        try:
+            with open(s_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                utts = data.get("utterances", [])
+                for u in utts:
+                    if u.get("user_id") == target_user_id:
+                        text = u.get("text", "").strip()
+                        # Filtrar respuestas monosilábicas ("sí", "no") y párrafos anómalos
+                        if 12 <= len(text) <= 120 and text not in seen:
+                            seen.add(text)
+                            quotes.append(text)
+        except Exception:
+            continue
+
+    if not quotes:
+        return []
+
+    if len(quotes) <= max_quotes:
+        return quotes
+
+    step = max(1, len(quotes) // max_quotes)
+    return quotes[::step][:max_quotes]
+
+
 def compile_twin_prompt(
     profile: UserProfile,
     few_shot_dialogues: Optional[List[Dict[str, str]]] = None,
+    verbatim_quotes: Optional[List[str]] = None,
 ) -> str:
     """
     Compila el System Prompt completo para el Gemelo Digital utilizando Jinja2.
+    Calibra el estilo contra caricaturas de jerga, prioriza el registro real de voz
+    y restringe las notas manuales como memoria pasiva sin forzar.
     """
     # Si no se proveyeron diálogos explícitos, usar las citas de evidencia registradas en el perfil
     if not few_shot_dialogues:
@@ -186,13 +316,51 @@ def compile_twin_prompt(
 
     # Extraer las palabras más frecuentes del idiolecto del usuario (top 25 con frecuencia >= 1)
     top_vocab = []
-    if profile.dialect_markers and profile.dialect_markers.vocabulary_frequencies:
+    vocab = getattr(profile.dialect_markers, "vocabulary_frequencies", {}) or {}
+    if vocab:
         sorted_words = sorted(
-            profile.dialect_markers.vocabulary_frequencies.items(),
+            vocab.items(),
             key=lambda x: x[1],
             reverse=True,
         )
         top_vocab = [(w, c) for w, c in sorted_words if c >= 1][:25]
+
+    # Calibración de modismos reales: si existen datos de vocabulario de llamadas reales,
+    # descartar modismos que tengan 0 apariciones en el registro real para no caricaturizar
+    raw_slang = list(getattr(profile.dialect_markers, "favorite_slang", []) or [])
+    raw_fillers = list(getattr(profile.dialect_markers, "discourse_fillers", []) or [])
+
+    if vocab and len(vocab) > 20:
+        real_slang = [s for s in raw_slang if vocab.get(s.lower(), 0) > 0]
+        if not real_slang and vocab.get("boludo", 0) > 0:
+            real_slang = ["boludo"]
+        favorite_slang = real_slang
+
+        real_fillers = [f for f in raw_fillers if vocab.get(f.lower(), 0) > 0]
+        discourse_fillers = real_fillers if real_fillers else raw_fillers
+    else:
+        favorite_slang = raw_slang
+        discourse_fillers = raw_fillers
+
+    # Si no se proveyeron citas textuales explícitas, extraer citas de evidencia
+    if verbatim_quotes is None:
+        v_quotes = []
+        for trait in [
+            profile.big_five.openness,
+            profile.big_five.conscientiousness,
+            profile.big_five.extraversion,
+            profile.big_five.agreeableness,
+            profile.big_five.neuroticism,
+        ]:
+            for eq in getattr(trait, "evidence_quotes", []):
+                clean_q = eq.quote.strip()
+                if clean_q and clean_q not in v_quotes:
+                    v_quotes.append(clean_q)
+                if len(v_quotes) >= 8:
+                    break
+            if len(v_quotes) >= 8:
+                break
+        verbatim_quotes = v_quotes
 
     template = jinja2.Template(TWIN_SYSTEM_TEMPLATE)
     rendered = template.render(
@@ -205,7 +373,10 @@ def compile_twin_prompt(
         communication_style=profile.communication_style,
         group_role=profile.group_role,
         dialect_markers=profile.dialect_markers,
+        favorite_slang=favorite_slang,
+        discourse_fillers=discourse_fillers,
         top_vocabulary=top_vocab,
+        verbatim_quotes=verbatim_quotes,
         few_shot_dialogues=few_shot_dialogues,
         social_dynamics=profile.social_dynamics,
         group_lore=profile.group_lore,

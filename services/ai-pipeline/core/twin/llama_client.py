@@ -143,8 +143,8 @@ class LlamaClient:
                 "llama-3.1-8b-instant",
                 "llama3-70b-8192",
                 "llama3-8b-8192",
-                "openai/gpt-oss-120b",
                 "qwen/qwen3.8-27b",
+                "openai/gpt-oss-120b",
                 "openai/gpt-oss-20b",
             ]
             for cand in candidates:
@@ -181,9 +181,22 @@ class LlamaClient:
             model=model_name,
             messages=messages,
             temperature=temperature,
-            max_tokens=max_tokens,
+            max_tokens=max(max_tokens, 400),
         )
-        return completion.choices[0].message.content.strip()
+        content = (completion.choices[0].message.content or "").strip()
+        if not content and model_name != "qwen/qwen3.8-27b":
+            # Si el modelo anterior agotó tokens en reasoning, reintentar con Qwen
+            try:
+                fallback_comp = client.chat.completions.create(
+                    model="qwen/qwen3.8-27b",
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=250,
+                )
+                content = (fallback_comp.choices[0].message.content or "").strip()
+            except Exception:
+                pass
+        return content
 
     def _call_openrouter(
         self,

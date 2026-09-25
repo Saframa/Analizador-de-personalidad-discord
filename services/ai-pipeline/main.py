@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import argparse
 import glob
+import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple
 
@@ -63,6 +65,9 @@ def resolve_session_path(session_arg: str, base_storage_dir: str) -> str:
     raw_sessions_dir = os.path.join(base_storage_dir, "raw_sessions")
     if not os.path.exists(raw_sessions_dir):
         raise FileNotFoundError(f"Directorio no encontrado: {raw_sessions_dir}")
+
+    if session_arg == "all":
+        return "all"
 
     if session_arg == "latest":
         candidates = sorted(
@@ -553,6 +558,85 @@ def synthesize_user_voice(
         release_tts_gpu_memory()
 
 
+def watch_sessions(
+    base_storage_dir: str,
+    interval: int = 15,
+    profile: bool = True,
+    delete_audio: bool = True,
+    model_size: str = "medium",
+) -> None:
+    """
+    Monitorea de forma continua storage/raw_sessions/ y procesa automáticamente
+    las nuevas llamadas finalizadas de Discord, transcribiéndolas, actualizando los
+    perfiles longitudinales y eliminando los audios pesados para no ocupar disco.
+    """
+    raw_sessions_dir = os.path.join(base_storage_dir, "raw_sessions")
+    if not os.path.exists(raw_sessions_dir):
+        os.makedirs(raw_sessions_dir, exist_ok=True)
+
+    print("\n" + "=" * 65)
+    print("👀 MODO VIGILANTE AUTÓNOMO (WATCHER) INICIADO")
+    print(f"📁 Monitoreando directorio:  {raw_sessions_dir}")
+    print(f"⏱️  Intervalo de sondeo:     {interval}s")
+    print(f"🧠 Perfilado Gemini:        {'ACTIVO' if profile else 'Desactivado'}")
+    print(f"🧹 Limpieza de disco:       {'ACTIVA (se liberará el audio tras perfilar)' if delete_audio else 'Desactivada'}")
+    print(f"🎙️ Modelo STT:              faster-whisper ({model_size})")
+    print("=" * 65)
+    print("El sistema procesará automáticamente cualquier llamada apenas termine.")
+    print("Presiona Ctrl+C en cualquier momento para detener el vigilante.\n")
+
+    while True:
+        try:
+            candidates = sorted(glob.glob(os.path.join(raw_sessions_dir, "*")))
+            for session_dir in candidates:
+                if not os.path.isdir(session_dir):
+                    continue
+                meta_file = os.path.join(session_dir, "session_metadata.json")
+                if not os.path.exists(meta_file):
+                    continue
+
+                transcript_file = os.path.join(session_dir, "transcript.json")
+                audio_dir = os.path.join(session_dir, "audio")
+                purged_file = os.path.join(audio_dir, ".purged")
+
+                # Verificar si tiene audio pendiente y no fue purgada
+                if os.path.exists(audio_dir) and not os.path.exists(purged_file):
+                    try:
+                        with open(meta_file, "r", encoding="utf-8") as f:
+                            meta = json.load(f)
+                        if not meta.get("ended_at"):
+                            continue  # Llamada aún en curso en Discord
+                    except Exception:
+                        continue
+
+                    session_id = os.path.basename(session_dir)
+                    print(f"\n🔔 [NUEVA LLAMADA DETECTADA: {session_id}]")
+                    if not os.path.exists(transcript_file):
+                        process_session(
+                            session_dir=session_dir,
+                            model_size=model_size,
+                            curate_samples=True,
+                            base_storage_dir=base_storage_dir,
+                        )
+                    if profile:
+                        profile_session(
+                            session_dir=session_dir,
+                            base_storage_dir=base_storage_dir,
+                            cleanup_audio=delete_audio,
+                        )
+                    elif delete_audio:
+                        cleanup_session_audio(session_dir)
+                    print(f"✅ [LLAMADA {session_id} COMPLETADA - AUDIO PURGADO]\n")
+
+            time.sleep(interval)
+        except (KeyboardInterrupt, EOFError):
+            print("\n🛑 Vigilante detenido por el usuario.\n")
+            break
+        except Exception as e:
+            print(f"⚠️ Error en ciclo de vigilancia: {e}")
+            time.sleep(interval)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Orquestador STT, Curador de Voz y Gemelo Digital")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -710,6 +794,38 @@ def main():
         help="Ruta base del directorio de almacenamiento",
     )
 
+    # Subcomando: watch
+    watch_parser = subparsers.add_parser("watch", help="Vigilante autónomo: detecta y procesa llamadas nuevas en segundo plano")
+    watch_parser.add_argument(
+        "--interval",
+        type=int,
+        default=15,
+        help="Intervalo en segundos entre comprobaciones (por defecto: 15s)",
+    )
+    watch_parser.add_argument(
+        "--no-profile",
+        action="store_true",
+        help="Desactiva el perfilado automático con Gemini",
+    )
+    watch_parser.add_argument(
+        "--keep-audio",
+        action="store_true",
+        help="Conserva los audios pesados en lugar de eliminarlos tras el perfilado",
+    )
+    watch_parser.add_argument(
+        "--model-size",
+        type=str,
+        default="medium",
+        choices=["tiny", "base", "small", "medium", "large-v3", "turbo"],
+        help="Modelo de faster-whisper",
+    )
+    watch_parser.add_argument(
+        "--storage-dir",
+        type=str,
+        default="",
+        help="Ruta base del directorio de almacenamiento",
+    )
+
     args = parser.parse_args()
 
     base_storage = args.storage_dir
@@ -717,21 +833,56 @@ def main():
         base_storage = os.path.abspath(os.path.join(CURRENT_DIR, "..", "..", "storage"))
 
     if args.command == "process":
-        session_path = resolve_session_path(args.session, base_storage)
-        process_session(
-            session_dir=session_path,
-            model_size=args.model_size,
-            curate_samples=not args.no_clean_samples,
-            base_storage_dir=base_storage,
-        )
-        if args.profile:
-            profile_session(
+        if args.session == "all":
+            raw_sessions_dir = os.path.join(base_storage, "raw_sessions")
+            candidates = sorted(glob.glob(os.path.join(raw_sessions_dir, "*")))
+            target_sessions = [
+                d for d in candidates
+                if os.path.isdir(d) and os.path.exists(os.path.join(d, "session_metadata.json"))
+            ]
+            if not target_sessions:
+                print(f"❌ No se encontraron sesiones grabadas en {raw_sessions_dir}.")
+                return
+            print(f"🚀 Procesando {len(target_sessions)} sesiones acumuladas en lote...")
+            for s_path in target_sessions:
+                s_id = os.path.basename(s_path)
+                t_file = os.path.join(s_path, "transcript.json")
+                a_dir = os.path.join(s_path, "audio")
+                p_file = os.path.join(a_dir, ".purged")
+                if not os.path.exists(t_file) or (os.path.exists(a_dir) and not os.path.exists(p_file)):
+                    print(f"\n▶️ [Procesando sesión: {s_id}]")
+                    if not os.path.exists(t_file):
+                        process_session(
+                            session_dir=s_path,
+                            model_size=args.model_size,
+                            curate_samples=not args.no_clean_samples,
+                            base_storage_dir=base_storage,
+                        )
+                    if args.profile:
+                        profile_session(
+                            session_dir=s_path,
+                            base_storage_dir=base_storage,
+                            cleanup_audio=args.delete_audio,
+                        )
+                    elif args.delete_audio:
+                        cleanup_session_audio(s_path)
+            print("\n🎉 Todas las sesiones pendientes han sido procesadas.")
+        else:
+            session_path = resolve_session_path(args.session, base_storage)
+            process_session(
                 session_dir=session_path,
+                model_size=args.model_size,
+                curate_samples=not args.no_clean_samples,
                 base_storage_dir=base_storage,
-                cleanup_audio=args.delete_audio,
             )
-        elif args.delete_audio:
-            cleanup_session_audio(session_path)
+            if args.profile:
+                profile_session(
+                    session_dir=session_path,
+                    base_storage_dir=base_storage,
+                    cleanup_audio=args.delete_audio,
+                )
+            elif args.delete_audio:
+                cleanup_session_audio(session_path)
 
     elif args.command == "profile":
         session_path = resolve_session_path(args.session, base_storage)
@@ -763,6 +914,15 @@ def main():
             output_path=args.output,
             mock=args.mock,
             play=args.play,
+        )
+
+    elif args.command == "watch":
+        watch_sessions(
+            base_storage_dir=base_storage,
+            interval=args.interval,
+            profile=not args.no_profile,
+            delete_audio=not args.keep_audio,
+            model_size=args.model_size,
         )
 
 

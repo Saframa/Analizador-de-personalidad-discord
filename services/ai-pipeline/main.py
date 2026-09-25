@@ -504,6 +504,7 @@ def interactive_chat(
     base_storage_dir: str,
     target_user_id: Optional[str] = None,
     model_name: str = "gemini-flash-latest",
+    backend: str = "auto",
     mock: bool = False,
     single_turn_prompt: Optional[str] = None,
     enable_voice: bool = False,
@@ -584,6 +585,7 @@ def interactive_chat(
         profile=selected_profile,
         few_shot_dialogues=few_shots,
         model_name=model_name,
+        backend=backend,
         mock=mock,
     )
 
@@ -595,6 +597,8 @@ def interactive_chat(
             print(f"⚠️ No se pudo inicializar el clonador de voz: {e}")
 
     comm = selected_profile.communication_style
+    llama_ok = chat.llama_client.is_available()
+    llama_status = "✅ Lista (Groq LLaMA 3.3)" if llama_ok else "⏳ Inactiva (Falta GROQ_API_KEY en .env)"
     print("\n" + "=" * 65)
     print(f"🤖 GEMELO DIGITAL: {selected_profile.username} (@{selected_profile.user_id})")
     print("=" * 65)
@@ -603,7 +607,8 @@ def interactive_chat(
     print(f"⏱️  Cadencia y turno:   {comm.cadence} (~{comm.avg_words_per_turn:.0f} palabras/turno)")
     print(f"🇺🇾 Modismos preferidos: {', '.join(selected_profile.dialect_markers.favorite_slang) or 'bo, ta, flama'}")
     print(f"🔥 Temperatura modelo: {chat.temperature} (calibrada por Big Five)")
-    print(f"🧠 Backend:            {chat.model_name} (mock={chat.mock})")
+    print(f"🧠 Motor principal:     {chat.backend.upper()} ({chat.model_name})")
+    print(f"🦙 Respaldo LLaMA:      {llama_status}")
     print(f"🎙️ Clonación de voz:  {'ACTIVA (F5-TTS)' if cloner else 'Desactivada'}")
     if play_audio and cloner:
         print("🔊 Reproducción audio: ACTIVA (Altavoces)")
@@ -1137,7 +1142,14 @@ def main():
         "--model",
         type=str,
         default="gemini-flash-latest",
-        help="Modelo de Gemini para el chat (por defecto: gemini-flash-latest)",
+        help="Modelo de Gemini o LLaMA para el chat (ej. gemini-flash-latest o llama-3.3-70b-versatile)",
+    )
+    chat_parser.add_argument(
+        "--backend",
+        type=str,
+        choices=["auto", "gemini", "llama"],
+        default="auto",
+        help="Motor de IA ('gemini', 'llama' o 'auto' con fallback transparente a LLaMA)",
     )
     chat_parser.add_argument(
         "--mock",
@@ -1361,6 +1373,7 @@ def main():
             base_storage_dir=base_storage,
             target_user_id=args.user_id,
             model_name=args.model,
+            backend=args.backend,
             mock=args.mock,
             single_turn_prompt=args.prompt,
             enable_voice=args.voice,

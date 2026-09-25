@@ -147,6 +147,119 @@
       "type": "array",
       "description": "Rutas relativas a las mejores muestras de audio limpias disponibles para clonación de voz",
       "items": { "type": "string" }
+    },
+    "social_dynamics": {
+      "type": "object",
+      "description": "Dinámica relacional, grafo social y afinidad interpersonal con otros miembros",
+      "properties": {
+        "affinities": {
+          "type": "object",
+          "description": "Mapeo de user_id a métricas de afinidad",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "user_id": { "type": "string" },
+              "username": { "type": "string" },
+              "interaction_count": { "type": "integer", "minimum": 0 },
+              "reply_count": { "type": "integer", "minimum": 0 },
+              "affinity_score": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+              "notes": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "closest_friends": {
+          "type": "array",
+          "description": "IDs o nombres de amigos con mayor afinidad o cercanía conversacional",
+          "items": { "type": "string" }
+        },
+        "teasing_targets": {
+          "type": "array",
+          "description": "Amigos a quienes suele dirigir chicanas o bromas afectuosas",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "group_lore": {
+      "type": "object",
+      "description": "Memoria episódica, chistes internos y referencias a entidades externas compartidas",
+      "properties": {
+        "inside_jokes": {
+          "type": "array",
+          "description": "Chistes internos, frases meme o códigos particulares del grupo",
+          "items": { "type": "string" }
+        },
+        "external_entities": {
+          "type": "array",
+          "description": "Personas externas, lugares, juegos, materias o proyectos recurrentes",
+          "items": { "type": "string" }
+        },
+        "notable_anecdotes": {
+          "type": "array",
+          "description": "Anécdotas o recuerdos compartidos evocados en las llamadas",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "emotional_triggers": {
+      "type": "object",
+      "description": "Disparadores emocionales extremos: temas de frustración/tilteo vs hiperfocos apasionados",
+      "properties": {
+        "tilts": {
+          "type": "array",
+          "description": "Situaciones o temas que le provocan quejas, tilteo o molestia cómica",
+          "items": { "type": "string" }
+        },
+        "hyperfocus_topics": {
+          "type": "array",
+          "description": "Temas de interés profundo donde habla extensamente y con alta energía",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "activity_initiative": {
+      "type": "object",
+      "description": "Rol operativo e iniciativa en propuestas y permanencia en la llamada",
+      "properties": {
+        "initiative_level": {
+          "type": "string",
+          "enum": ["iniciador", "seguidor", "neutro"],
+          "description": "Si propone actividades nuevas o se suma a lo que ya están haciendo"
+        },
+        "proposes_activities": {
+          "type": "boolean",
+          "description": "Si suele lanzar iniciativas de juego o contenido"
+        },
+        "departure_pattern": {
+          "type": "string",
+          "enum": ["tempranero", "noctambulo_extremo", "variable"],
+          "description": "Patrón de permanencia o despedida de la llamada"
+        },
+        "typical_proposals": {
+          "type": "array",
+          "description": "Juegos o planes que suele proponer",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "temporal_patterns": {
+      "type": "object",
+      "description": "Patrones cronobiológicos y variación del tono según el horario",
+      "properties": {
+        "cronotype": {
+          "type": "string",
+          "enum": ["madrugador", "vespertino", "noctambulo"],
+          "description": "Franja horaria predominante de presencia"
+        },
+        "peak_hours": {
+          "type": "array",
+          "description": "Franjas horarias con mayor volumen de intervenciones",
+          "items": { "type": "string" }
+        },
+        "late_night_attitude": {
+          "type": ["string", "null"],
+          "description": "Cómo varía su humor, energía o cadencia a altas horas de la noche"
+        }
+      }
     }
   },
   "definitions": {

@@ -4,7 +4,7 @@ Calcula métricas estadísticas directas desde los enunciados de la sesión:
 volumen de habla, palabras por turno, tasa de interrupción/solapamiento y cadencia.
 """
 
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 import numpy as np
 
 from core.contracts.models import SessionTranscript, Utterance
@@ -123,3 +123,98 @@ def compute_user_metrics(
         cadence=cadence,
         words_per_second=overall_wps,
     )
+
+
+class SessionSocialTemporalMetrics:
+    """Métricas cuantitativas de interacción social y contexto temporal de la sesión."""
+    def __init__(
+        self,
+        target_user_id: str,
+        peer_interactions: Dict[str, Dict[str, Any]],
+        session_hour: int,
+        hour_category: str,
+    ):
+        self.target_user_id = target_user_id
+        self.peer_interactions = peer_interactions
+        self.session_hour = session_hour
+        self.hour_category = hour_category
+
+
+def compute_social_and_temporal_metrics(
+    transcript: SessionTranscript,
+    threads: Optional[List[Any]],
+    target_user_id: str,
+) -> SessionSocialTemporalMetrics:
+    """
+    Calcula algoritmicamente (0 tokens) las interacciones recíprocas entre el usuario
+    y sus compañeros en los hilos discursivos, así como la franja horaria de la sesión.
+    """
+    peer_stats: Dict[str, Dict[str, Any]] = {}
+    user_map: Dict[str, str] = {}
+
+    for u in transcript.utterances:
+        user_map[u.user_id] = u.username
+
+    # 1. Contar réplicas e interacciones a partir de hilos conversacionales
+    if threads:
+        turn_map = {}
+        for thread in threads:
+            for turn in thread.turns:
+                turn_map[turn.utterance_id] = turn
+
+        for thread in threads:
+            for turn in thread.turns:
+                if turn.reply_to_utterance_id and turn.reply_to_utterance_id in turn_map:
+                    parent_turn = turn_map[turn.reply_to_utterance_id]
+                    # Si el target le respondió a un compañero
+                    if turn.user_id == target_user_id and parent_turn.user_id != target_user_id:
+                        p_id = parent_turn.user_id
+                        p_name = parent_turn.username
+                        if p_id not in peer_stats:
+                            peer_stats[p_id] = {"username": p_name, "interactions": 0, "replies_to": 0}
+                        peer_stats[p_id]["interactions"] += 1
+                        peer_stats[p_id]["replies_to"] += 1
+                    # Si un compañero le respondió al target
+                    elif turn.user_id != target_user_id and parent_turn.user_id == target_user_id:
+                        p_id = turn.user_id
+                        p_name = turn.username
+                        if p_id not in peer_stats:
+                            peer_stats[p_id] = {"username": p_name, "interactions": 0, "replies_to": 0}
+                        peer_stats[p_id]["interactions"] += 1
+
+    # 2. Contabilizar solapamientos mutuos (intervenciones simultáneas)
+    for u in transcript.utterances:
+        if u.user_id == target_user_id and u.overlapping_speakers:
+            for p_id in u.overlapping_speakers:
+                if p_id and p_id != target_user_id:
+                    p_name = user_map.get(p_id, p_id)
+                    if p_id not in peer_stats:
+                        peer_stats[p_id] = {"username": p_name, "interactions": 0, "replies_to": 0}
+                    peer_stats[p_id]["interactions"] += 1
+
+    # 3. Extracción de horario a partir de session_id o processed_at
+    session_hour = 20  # default
+    try:
+        # Formato esperado: YYYY-MM-DD_HH-MM-SS
+        time_part = transcript.session_id.split("_")[1]
+        session_hour = int(time_part.split("-")[0])
+    except Exception:
+        if transcript.processed_at:
+            session_hour = transcript.processed_at.hour
+
+    if 5 <= session_hour < 12:
+        hour_cat = "mañana (05:00 - 12:00)"
+    elif 12 <= session_hour < 19:
+        hour_cat = "tarde (12:00 - 19:00)"
+    elif 19 <= session_hour <= 23:
+        hour_cat = "noche (19:00 - 23:59)"
+    else:
+        hour_cat = "madrugada (00:00 - 04:59)"
+
+    return SessionSocialTemporalMetrics(
+        target_user_id=target_user_id,
+        peer_interactions=peer_stats,
+        session_hour=session_hour,
+        hour_category=hour_cat,
+    )
+

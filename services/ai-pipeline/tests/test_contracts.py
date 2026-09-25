@@ -52,6 +52,48 @@ class TestJsonSchemaValidation:
         data = load_json(os.path.join(FIXTURES_DIR, "sample_user_profile.json"))
         jsonschema.validate(instance=data, schema=schema)
 
+    def test_multidimensional_user_profile_schema_valid(self):
+        schema = load_json(os.path.join(DOCS_SPECS_DIR, "user_profile.schema.json"))
+        data = load_json(os.path.join(FIXTURES_DIR, "sample_user_profile.json"))
+        data["social_dynamics"] = {
+            "affinities": {
+                "222222222222222222": {
+                    "user_id": "222222222222222222",
+                    "username": "kevinjaffe",
+                    "interaction_count": 5,
+                    "reply_count": 3,
+                    "affinity_score": 0.85,
+                    "notes": "amigo cercano",
+                }
+            },
+            "closest_friends": ["kevinjaffe"],
+            "teasing_targets": ["kevinjaffe"],
+        }
+        data["group_lore"] = {
+            "inside_jokes": ["dar flama", "el bot"],
+            "external_entities": ["Discord", "Twitch"],
+            "notable_anecdotes": ["la partida de lol"],
+        }
+        data["emotional_triggers"] = {
+            "tilts": ["lag"],
+            "hyperfocus_topics": ["programacion"],
+        }
+        data["activity_initiative"] = {
+            "initiative_level": "iniciador",
+            "proposes_activities": True,
+            "departure_pattern": "variable",
+            "typical_proposals": ["jugar lol"],
+        }
+        data["temporal_patterns"] = {
+            "cronotype": "noctambulo",
+            "peak_hours": ["noche (19:00 - 23:59)"],
+            "late_night_attitude": "relajado",
+        }
+        jsonschema.validate(instance=data, schema=schema)
+        profile = UserProfile.model_validate(data)
+        assert profile.social_dynamics.closest_friends == ["kevinjaffe"]
+        assert profile.group_lore.inside_jokes == ["dar flama", "el bot"]
+
 
 # ==============================================================================
 # 2. VERIFICACIÓN CON MODELOS PYDANTIC V2

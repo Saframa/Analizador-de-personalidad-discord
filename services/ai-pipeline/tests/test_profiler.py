@@ -16,7 +16,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from core.contracts.models import SessionTranscript, Utterance, UserProfile
-from core.profiler.metrics import compute_user_metrics
+from core.profiler.metrics import compute_user_metrics, compute_social_and_temporal_metrics
 from core.profiler.gemini_analyzer import GeminiProfiler, GeminiSessionEvaluation
 from core.profiler.profile_synthesizer import ProfileSynthesizer, running_avg
 
@@ -247,3 +247,64 @@ def test_create_daily_backup(tmp_path):
     # Llamar de nuevo hoy debe retornar el mismo archivo existente
     second_call = create_daily_backup(str(tmp_path))
     assert second_call == backup_path
+
+
+def test_compute_social_and_temporal_metrics(sample_transcript):
+    social_metrics = compute_social_and_temporal_metrics(
+        transcript=sample_transcript,
+        threads=None,
+        target_user_id="user_marce",
+    )
+    assert social_metrics.target_user_id == "user_marce"
+    # Interacción por solapamiento con user_arbustin
+    assert "user_arbustin" in social_metrics.peer_interactions
+    assert social_metrics.peer_interactions["user_arbustin"]["interactions"] >= 1
+    # Hora de la sesión: 00:00 -> madrugada
+    assert "madrugada" in social_metrics.hour_category
+
+
+def test_profile_synthesis_multidimensional(tmp_path, sample_transcript):
+    synthesizer = ProfileSynthesizer(storage_dir=str(tmp_path))
+    metrics = compute_user_metrics(sample_transcript, "user_marce")
+    profiler = GeminiProfiler(mock=True)
+    evaluation = profiler.analyze_user_session(sample_transcript, "user_marce", "saframa", metrics)
+    social_metrics = compute_social_and_temporal_metrics(sample_transcript, None, "user_marce")
+
+    # Sesión 1
+    profile_s1 = synthesizer.synthesize_profile(
+        user_id="user_marce",
+        username="saframa",
+        session_id=sample_transcript.session_id,
+        session_metrics=metrics,
+        evaluation=evaluation,
+        social_temporal_metrics=social_metrics,
+    )
+
+    assert profile_s1.social_dynamics is not None
+    assert "user_arbustin" in profile_s1.social_dynamics.affinities
+    assert len(profile_s1.group_lore.inside_jokes) >= 1
+    assert "dar flama" in profile_s1.group_lore.inside_jokes or len(profile_s1.group_lore.inside_jokes) > 0
+    assert profile_s1.temporal_patterns.cronotype == "noctambulo"
+    assert len(profile_s1.temporal_patterns.peak_hours) >= 1
+
+    # Sesión 2: acumulación y enriquecimiento
+    evaluation_s2 = evaluation.model_copy()
+    evaluation_s2.inside_jokes = ["dar flama", "el bot se fue de tema"]
+    evaluation_s2.tilts = ["lag en discord"]
+
+    profile_s2 = synthesizer.synthesize_profile(
+        user_id="user_marce",
+        username="saframa",
+        session_id="2026-09-25_00-15-00",
+        session_metrics=metrics,
+        evaluation=evaluation_s2,
+        social_temporal_metrics=social_metrics,
+    )
+
+    assert profile_s2.total_sessions_analyzed == 2
+    # Las interacciones deben haberse incrementado
+    assert profile_s2.social_dynamics.affinities["user_arbustin"].interaction_count >= 2
+    # Inside jokes combinados y deduplicados
+    assert "el bot se fue de tema" in profile_s2.group_lore.inside_jokes
+    assert "lag en discord" in profile_s2.emotional_triggers.tilts
+

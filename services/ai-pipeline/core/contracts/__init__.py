@@ -12,6 +12,12 @@ from .models import (
     CommunicationStyle,
     GroupRole,
     DialectMarkers,
+    InterlocutorAffinity,
+    SocialDynamics,
+    GroupLore,
+    EmotionalTriggers,
+    ActivityInitiative,
+    TemporalPatterns,
 )
 
 __all__ = [
@@ -27,4 +33,10 @@ __all__ = [
     "CommunicationStyle",
     "GroupRole",
     "DialectMarkers",
+    "InterlocutorAffinity",
+    "SocialDynamics",
+    "GroupLore",
+    "EmotionalTriggers",
+    "ActivityInitiative",
+    "TemporalPatterns",
 ]

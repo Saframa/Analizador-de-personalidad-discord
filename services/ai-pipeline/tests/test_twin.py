@@ -14,12 +14,17 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from core.contracts.models import (
+    ActivityInitiative,
     BigFiveTraits,
     CommunicationStyle,
     DialectMarkers,
+    EmotionalTriggers,
     EvidenceQuote,
+    GroupLore,
     GroupRole,
     SessionTranscript,
+    SocialDynamics,
+    TemporalPatterns,
     TraitEvaluation,
     UserProfile,
     Utterance,
@@ -205,3 +210,51 @@ def test_digital_twin_chat_mock(mock_profile):
     # 3. Reiniciar historial
     chat.reset()
     assert len(chat.history) == 0
+
+
+def test_compile_twin_prompt_multidimensional(mock_profile):
+    profile = mock_profile.model_copy()
+    profile.social_dynamics = SocialDynamics(
+        closest_friends=["Kevin", "Troche"],
+        teasing_targets=["Troche"],
+    )
+    profile.group_lore = GroupLore(
+        inside_jokes=["clonar la voz a los pibes", "dar flama"],
+        external_entities=["Discord", "LoL"],
+    )
+    profile.emotional_triggers = EmotionalTriggers(
+        tilts=["lag en la llamada", "perder por culpa del jungla"],
+        hyperfocus_topics=["inteligencia artificial", "modelos de voz"],
+    )
+    profile.activity_initiative = ActivityInitiative(
+        initiative_level="iniciador",
+        typical_proposals=["jugar un aram", "probar el bot nuevo"],
+    )
+    profile.temporal_patterns = TemporalPatterns(
+        cronotype="noctambulo",
+        late_night_attitude="tono relajado y chicanas absurdas",
+    )
+
+    prompt = compile_twin_prompt(profile)
+
+    # Verificar que las nuevas secciones existan en el prompt compilado
+    assert "TUS VÍNCULOS Y DINÁMICA SOCIAL EN EL GRUPO" in prompt
+    assert "Kevin, Troche" in prompt
+    assert "Troche" in prompt
+
+    assert "LORE GRUPAL Y CÓDIGOS INTERNOS QUE CONOCES" in prompt
+    assert "clonar la voz a los pibes" in prompt
+    assert "Discord, LoL" in prompt
+
+    assert "TUS DISPARADORES EMOCIONALES" in prompt
+    assert "lag en la llamada" in prompt
+    assert "inteligencia artificial" in prompt
+
+    assert "TU INICIATIVA EN ACTIVIDADES" in prompt
+    assert "iniciador" in prompt
+    assert "jugar un aram" in prompt
+
+    assert "TU CRONOTIPO Y ENERGÍA" in prompt
+    assert "noctambulo" in prompt
+    assert "tono relajado y chicanas absurdas" in prompt
+

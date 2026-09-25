@@ -38,7 +38,7 @@ from core.contracts.models import (
 from core.context.threader import DiscourseThreader
 from core.curator.voice_curator import VoiceCurator
 from core.profiler.gemini_analyzer import GeminiProfiler
-from core.profiler.metrics import compute_user_metrics
+from core.profiler.metrics import compute_user_metrics, compute_social_and_temporal_metrics
 from core.profiler.profile_synthesizer import ProfileSynthesizer
 from core.user_manager.manager import UserManager
 from core.stt.transcriber import WhisperTranscriber, release_gpu_memory
@@ -414,9 +414,11 @@ def profile_session(
             print(f"      • Sin intervenciones habladas en esta sesión. Omitiendo perfilado profundo.")
             continue
 
+        social_temporal_metrics = compute_social_and_temporal_metrics(transcript, threads, user_id)
+
         print(f"      • Métricas: {metrics.turn_count} turnos, {metrics.total_words} palabras, "
               f"{metrics.avg_words_per_turn:.1f} pal/turno, cadencia '{metrics.cadence}', "
-              f"interrupciones: {metrics.interruption_ratio*100:.1f}%")
+              f"interrupciones: {metrics.interruption_ratio*100:.1f}%, franja '{social_temporal_metrics.hour_category}'")
 
         # 2. Inferencia cualitativa / Gemini enriquecida con contexto de hilos
         print(f"      • Ejecutando análisis sociolingüístico y Big Five (modelo: {model_name} | mock={profiler.mock})...")
@@ -435,6 +437,7 @@ def profile_session(
             session_id=metadata.session_id,
             session_metrics=metrics,
             evaluation=evaluation,
+            social_temporal_metrics=social_temporal_metrics,
         )
         updated_profiles.append(profile)
 
@@ -443,6 +446,18 @@ def profile_session(
         print(f"      [OK] Perfil sintetizado (Sesión #{profile.total_sessions_analyzed}, {profile.total_speaking_seconds:.1f}s acumulados):")
         print(f"         - Rol en el grupo: {profile.group_role.primary_role}")
         print(f"         - Humor y estilo:  {profile.communication_style.humor_type}")
+        if profile.social_dynamics.closest_friends or profile.social_dynamics.teasing_targets:
+            c_str = ", ".join(profile.social_dynamics.closest_friends) or "Ninguno aún"
+            t_str = ", ".join(profile.social_dynamics.teasing_targets) or "Ninguno aún"
+            print(f"         - Dinámica social: Afinidad con: [{c_str}] | Chicanas a: [{t_str}]")
+        if profile.group_lore.inside_jokes:
+            print(f"         - Lore / Jokes:    {'; '.join(profile.group_lore.inside_jokes[:3])}")
+        if profile.emotional_triggers.tilts or profile.emotional_triggers.hyperfocus_topics:
+            tilts_s = ", ".join(profile.emotional_triggers.tilts[:2]) or "N/A"
+            hyper_s = ", ".join(profile.emotional_triggers.hyperfocus_topics[:2]) or "N/A"
+            print(f"         - Disparadores:    Tilts: [{tilts_s}] | Hiperfocos: [{hyper_s}]")
+        if profile.temporal_patterns.peak_hours:
+            print(f"         - Cronotipo:       {profile.temporal_patterns.cronotype} ({', '.join(profile.temporal_patterns.peak_hours)})")
         print(f"         - Big Five:")
         print(f"           • Apertura:        {bf.openness.score:.2f} (confianza: {bf.openness.confidence:.2f})")
         print(f"           • Responsabilidad: {bf.conscientiousness.score:.2f} (confianza: {bf.conscientiousness.confidence:.2f})")
@@ -849,6 +864,35 @@ def handle_user_command(args, base_storage_dir: str):
         print(f"   • Extraversión:    {user.big_five.extraversion.score:.2f} (conf: {user.big_five.extraversion.confidence:.2f})")
         print(f"   • Amabilidad:      {user.big_five.agreeableness.score:.2f} (conf: {user.big_five.agreeableness.confidence:.2f})")
         print(f"   • Neuroticismo:    {user.big_five.neuroticism.score:.2f} (conf: {user.big_five.neuroticism.confidence:.2f})")
+
+        if user.social_dynamics.closest_friends or user.social_dynamics.teasing_targets:
+            print(f"\nDinámica Social y Vínculos:")
+            if user.social_dynamics.closest_friends:
+                print(f"   • Amigos cercanos:    {', '.join(user.social_dynamics.closest_friends)}")
+            if user.social_dynamics.teasing_targets:
+                print(f"   • Blanco de chicanas: {', '.join(user.social_dynamics.teasing_targets)}")
+        if user.group_lore.inside_jokes or user.group_lore.external_entities:
+            print(f"\nLore y Códigos de Grupo:")
+            if user.group_lore.inside_jokes:
+                print(f"   • Inside jokes:       {'; '.join(user.group_lore.inside_jokes)}")
+            if user.group_lore.external_entities:
+                print(f"   • Entidades clave:    {', '.join(user.group_lore.external_entities)}")
+        if user.emotional_triggers.tilts or user.emotional_triggers.hyperfocus_topics:
+            print(f"\nDisparadores Emocionales:")
+            if user.emotional_triggers.tilts:
+                print(f"   • Tilts / Quejas:     {', '.join(user.emotional_triggers.tilts)}")
+            if user.emotional_triggers.hyperfocus_topics:
+                print(f"   • Hiperfocos:         {', '.join(user.emotional_triggers.hyperfocus_topics)}")
+        if user.activity_initiative.typical_proposals or user.activity_initiative.initiative_level != "neutro":
+            print(f"\nIniciativa en Actividades:")
+            print(f"   • Rol operativo:      {user.activity_initiative.initiative_level}")
+            if user.activity_initiative.typical_proposals:
+                print(f"   • Propuestas:         {', '.join(user.activity_initiative.typical_proposals)}")
+        if user.temporal_patterns.peak_hours or user.temporal_patterns.cronotype:
+            print(f"\nPatrones Temporales:")
+            print(f"   • Cronotipo:          {user.temporal_patterns.cronotype}")
+            if user.temporal_patterns.peak_hours:
+                print(f"   • Horas pico:         {', '.join(user.temporal_patterns.peak_hours)}")
         print("=" * 65 + "\n")
 
     elif args.user_action == "update":

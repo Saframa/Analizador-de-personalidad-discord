@@ -137,6 +137,45 @@ class DialectMarkers(BaseModel):
     discourse_fillers: List[str] = Field(default_factory=list)
 
 
+class InterlocutorAffinity(BaseModel):
+    user_id: str = Field(..., min_length=1)
+    username: str = Field(..., min_length=1)
+    interaction_count: int = Field(default=0, ge=0)
+    reply_count: int = Field(default=0, ge=0)
+    affinity_score: float = Field(default=0.5, ge=0.0, le=1.0)
+    notes: Optional[str] = None
+
+
+class SocialDynamics(BaseModel):
+    affinities: Dict[str, InterlocutorAffinity] = Field(default_factory=dict)
+    closest_friends: List[str] = Field(default_factory=list)
+    teasing_targets: List[str] = Field(default_factory=list)
+
+
+class GroupLore(BaseModel):
+    inside_jokes: List[str] = Field(default_factory=list)
+    external_entities: List[str] = Field(default_factory=list)
+    notable_anecdotes: List[str] = Field(default_factory=list)
+
+
+class EmotionalTriggers(BaseModel):
+    tilts: List[str] = Field(default_factory=list)
+    hyperfocus_topics: List[str] = Field(default_factory=list)
+
+
+class ActivityInitiative(BaseModel):
+    initiative_level: Literal["iniciador", "seguidor", "neutro"] = "neutro"
+    proposes_activities: bool = False
+    departure_pattern: Literal["tempranero", "noctambulo_extremo", "variable"] = "variable"
+    typical_proposals: List[str] = Field(default_factory=list)
+
+
+class TemporalPatterns(BaseModel):
+    cronotype: Literal["madrugador", "vespertino", "noctambulo"] = "vespertino"
+    peak_hours: List[str] = Field(default_factory=list)
+    late_night_attitude: Optional[str] = None
+
+
 class UserProfile(BaseModel):
     version: Literal["1.0.0"] = Field("1.0.0")
     user_id: str = Field(..., min_length=1)
@@ -152,6 +191,11 @@ class UserProfile(BaseModel):
     display_name: Optional[str] = None
     nicknames: List[str] = Field(default_factory=list)
     notes: List[str] = Field(default_factory=list)
+    social_dynamics: SocialDynamics = Field(default_factory=SocialDynamics)
+    group_lore: GroupLore = Field(default_factory=GroupLore)
+    emotional_triggers: EmotionalTriggers = Field(default_factory=EmotionalTriggers)
+    activity_initiative: ActivityInitiative = Field(default_factory=ActivityInitiative)
+    temporal_patterns: TemporalPatterns = Field(default_factory=TemporalPatterns)
 
     def save_atomic(self, file_path: str) -> None:
         temp_path = f"{file_path}.tmp"
@@ -159,3 +203,4 @@ class UserProfile(BaseModel):
         with open(temp_path, "w", encoding="utf-8") as f:
             f.write(self.model_dump_json(indent=2))
         os.replace(temp_path, file_path)
+

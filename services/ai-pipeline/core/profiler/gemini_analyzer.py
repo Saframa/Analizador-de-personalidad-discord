@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 from core.contracts.models import (
@@ -60,6 +60,27 @@ class GeminiSessionEvaluation(BaseModel):
     favorite_slang: List[str] = Field(default_factory=list)
     discourse_fillers: List[str] = Field(default_factory=list)
     recurring_topics: List[str] = Field(default_factory=list)
+
+    # 👥 Afinidad y Dinámica Social
+    teasing_targets: List[str] = Field(default_factory=list, description="Amigos o usuarios a quienes dirige chicanas, bromas o cargadas afectuosas")
+    closest_friends: List[str] = Field(default_factory=list, description="Compañeros con los que muestra mayor sintonía, complicidad o apoyo mutuo")
+
+    # 🧠 Lore Grupal, Inside Jokes y Memoria Episódica
+    inside_jokes: List[str] = Field(default_factory=list, description="Chistes internos, frases meme o referencias exclusivas del grupo")
+    external_entities: List[str] = Field(default_factory=list, description="Entidades externas mencionadas (personas, juegos, streamers, lugares, materias, trabajos)")
+    notable_anecdotes: List[str] = Field(default_factory=list, description="Anécdotas o recuerdos pasados mencionados durante la llamada")
+
+    # 💥 Disparadores Emocionales (Tilts vs Hiperfocos)
+    tilts: List[str] = Field(default_factory=list, description="Situaciones, mecánicas de juegos o temas que provocan quejas, tilteo o calenturas cómicas")
+    hyperfocus_topics: List[str] = Field(default_factory=list, description="Temas o aficiones que provocan monólogos u opiniones entusiastas y extensas")
+
+    # 🎮 Iniciativa y Rol en Actividades
+    initiative_level: Literal["iniciador", "seguidor", "neutro"] = Field("neutro", description="Si propone planes/juegos o se suma a los de otros")
+    proposes_activities: bool = Field(False, description="Si hizo alguna propuesta concreta de juego o actividad en la sesión")
+    typical_proposals: List[str] = Field(default_factory=list, description="Planes o juegos propuestos por este usuario")
+
+    # 🕒 Comportamiento Temporal / Nocturno
+    late_night_attitude: Optional[str] = Field(None, description="Comportamiento o cambio de tono si la sesión transcurre tarde o de madrugada")
 
 
 class GeminiProfiler:
@@ -165,8 +186,12 @@ TRANSCRIPCIÓN Y CONTEXTO DISCURSIVO DE LA SESIÓN:
 REGLAS CRÍTICAS:
 1. Recuerda la calibración rioplatense (chicanas, 'bo', 'ta', 'salado').
 2. Evalúa cómo interactúa y responde a otros interlocutores según el flujo conversacional.
-3. CADA rasgo debe incluir citas textuales directas de las intervenciones de {target_username}.
+3. CADA rasgo del Big Five debe incluir citas textuales directas de las intervenciones de {target_username}.
 4. Si el usuario habló poco o no hay suficiente evidencia para un rasgo, pon confianza < 0.5 y score 0.5.
+5. Dinámica social: identifica a quién dirige chicanas/bromas afectuosas (teasing_targets) y con quién muestra mayor sintonía (closest_friends).
+6. Lore grupal: detecta chistes internos (inside_jokes), referencias a entidades/personas externas y anécdotas compartidas.
+7. Disparadores: extrae situaciones de queja/tilteo y temas de hiperfoco apasionado.
+8. Iniciativa: define si es 'iniciador', 'seguidor' o 'neutro', y describe cambios de actitud nocturnos si aplica.
 """
 
         # Reintentos exponenciales automáticos ante microcortes de red o rate-limits temporales
@@ -218,7 +243,12 @@ REGLAS CRÍTICAS:
                 humor_type="observacional", primary_role="El Oyente",
                 role_description="Participó de la llamada sin intervenciones registradas en el canal.",
                 conflict_style="evasión pacífica", rioplatense_frequency=0.0,
-                favorite_slang=[], discourse_fillers=[], recurring_topics=[]
+                favorite_slang=[], discourse_fillers=[], recurring_topics=[],
+                teasing_targets=[], closest_friends=[], inside_jokes=[],
+                external_entities=[], notable_anecdotes=[], tilts=[],
+                hyperfocus_topics=[], initiative_level="neutro",
+                proposes_activities=False, typical_proposals=[],
+                late_night_attitude=None,
             )
 
         # Recolectar citas textuales
@@ -235,20 +265,13 @@ REGLAS CRÍTICAS:
         rioplatense_density = round(min(1.0, slang_count / max(1, len(quotes))), 2)
 
         # Evaluar Big Five
-        # Extraversión vinculada a volumen de habla, exclamaciones e interrupciones
         exclamation_count = sum(u.text.count("!") + u.text.count("¡") for u in user_utterances)
         extraversion = min(0.95, max(0.2, 0.45 + (metrics.turn_count * 0.02) + (exclamation_count * 0.03)))
 
-        # Agreeableness: en llamadas entre amigos con chicanas
         agreeableness = 0.70  # Camaradería grupal estándar
-
-        # Apertura: uso de léxico variado y curiosidad
         openness = 0.65 if metrics.total_words > 40 else 0.50
-
-        # Conscientiousness: organización o directivas dadas
         conscientiousness = 0.60 if "supone" in full_text_lower or "abrí" in full_text_lower else 0.50
 
-        # Neuroticism: frustraciones, derrotismo humorístico
         neuroticism = 0.40
         if "rompió" in full_text_lower or "carajo" in full_text_lower or "enojaron" in full_text_lower:
             neuroticism = 0.55
@@ -260,6 +283,20 @@ REGLAS CRÍTICAS:
         else:
             primary_role = "El Colaborador Reactivo"
             role_desc = "Interviene puntualmente para acotar, responder con remates cómicos y acompañar las propuestas del grupo."
+
+        # Identificar amigos e interlocutores en la llamada
+        other_users = list({u.username for u in transcript.utterances if u.user_id != target_user_id})
+        teasing_targets = [u for u in other_users if any(u.lower() in q.lower() for q in quotes)]
+        if not teasing_targets and other_users:
+            teasing_targets = [other_users[0]]
+
+        inside_jokes = ["dar flama", "clonar la voz a los pibes"] if ("flama" in full_text_lower or "clon" in full_text_lower) else []
+        external_entities = ["Discord", "Kevin"] if "kevin" in full_text_lower else ["Discord"]
+        tilts = ["fallas de audio o lag", "cuando algo no funciona a la primera"] if ("rompió" in full_text_lower or "carajo" in full_text_lower) else []
+        hyperfocus = ["inteligencia artificial y clonación", "proyectos de software"] if ("voz" in full_text_lower or "clon" in full_text_lower or "web" in full_text_lower) else ["tecnología"]
+        initiative_level = "iniciador" if metrics.turn_count >= 6 else "seguidor"
+        proposes_activities = metrics.turn_count >= 6
+        typical_proposals = ["probar features nuevas", "jugar unas partidas"] if proposes_activities else []
 
         return GeminiSessionEvaluation(
             openness_score=round(openness, 2),
@@ -285,4 +322,15 @@ REGLAS CRÍTICAS:
             favorite_slang=found_slang if found_slang else ["flama", "posta"],
             discourse_fillers=found_fillers if found_fillers else ["bo", "ta"],
             recurring_topics=["pruebas y tecnología", "chicanas internas", "dinámica del grupo"],
+            teasing_targets=teasing_targets,
+            closest_friends=other_users,
+            inside_jokes=inside_jokes,
+            external_entities=external_entities,
+            notable_anecdotes=[],
+            tilts=tilts,
+            hyperfocus_topics=hyperfocus,
+            initiative_level=initiative_level,
+            proposes_activities=proposes_activities,
+            typical_proposals=typical_proposals,
+            late_night_attitude="tono relajado y de confianza con chicanas amistosas",
         )

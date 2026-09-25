@@ -10,20 +10,27 @@ from __future__ import annotations
 import glob
 import os
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from core.contracts.models import (
+    ActivityInitiative,
     BigFiveTraits,
     CommunicationStyle,
     DialectMarkers,
+    EmotionalTriggers,
     EvidenceQuote,
+    GroupLore,
     GroupRole,
+    InterlocutorAffinity,
     SessionTranscript,
+    SocialDynamics,
+    TemporalPatterns,
     TraitEvaluation,
     UserProfile,
 )
 from core.profiler.gemini_analyzer import GeminiSessionEvaluation
-from core.profiler.metrics import ConversationalMetrics
+from core.profiler.metrics import ConversationalMetrics, SessionSocialTemporalMetrics
+
 
 
 def running_avg(prev_val: float, new_val: float, n_prev: int, min_alpha: float = 0.05) -> float:
@@ -77,6 +84,149 @@ def merge_evidence_quotes(
     return merged[:max_quotes]
 
 
+def merge_unique_strings(existing_list: List[str], new_list: List[str], max_items: int = 15) -> List[str]:
+    """Combina listas preservando orden y eliminando duplicados case-insensitive."""
+    seen = set()
+    result = []
+    for item in existing_list + new_list:
+        clean = item.strip()
+        if clean and clean.lower() not in seen:
+            seen.add(clean.lower())
+            result.append(clean)
+    return result[:max_items]
+
+
+def synthesize_social_dynamics(
+    prev_dynamics: Optional[SocialDynamics],
+    evaluation: GeminiSessionEvaluation,
+    social_temporal_metrics: Optional[SessionSocialTemporalMetrics],
+) -> SocialDynamics:
+    """Sintetiza la matriz de afinidad con otros miembros y objetivos de chicanas."""
+    affinities = dict(prev_dynamics.affinities) if prev_dynamics else {}
+
+    if social_temporal_metrics:
+        for p_id, p_info in social_temporal_metrics.peer_interactions.items():
+            if p_id in affinities:
+                aff = affinities[p_id]
+                new_interactions = aff.interaction_count + p_info["interactions"]
+                new_replies = aff.reply_count + p_info.get("replies_to", 0)
+                score = round(min(0.98, max(0.40, 0.45 + (new_interactions * 0.05))), 2)
+                affinities[p_id] = InterlocutorAffinity(
+                    user_id=p_id,
+                    username=p_info["username"],
+                    interaction_count=new_interactions,
+                    reply_count=new_replies,
+                    affinity_score=score,
+                    notes=aff.notes,
+                )
+            else:
+                inter_count = p_info["interactions"]
+                score = round(min(0.98, max(0.40, 0.45 + (inter_count * 0.05))), 2)
+                affinities[p_id] = InterlocutorAffinity(
+                    user_id=p_id,
+                    username=p_info["username"],
+                    interaction_count=inter_count,
+                    reply_count=p_info.get("replies_to", 0),
+                    affinity_score=score,
+                )
+
+    prev_closest = prev_dynamics.closest_friends if prev_dynamics else []
+    prev_teasing = prev_dynamics.teasing_targets if prev_dynamics else []
+
+    closest = merge_unique_strings(prev_closest, evaluation.closest_friends, max_items=6)
+    teasing = merge_unique_strings(prev_teasing, evaluation.teasing_targets, max_items=6)
+
+    return SocialDynamics(
+        affinities=affinities,
+        closest_friends=closest,
+        teasing_targets=teasing,
+    )
+
+
+def synthesize_group_lore(
+    prev_lore: Optional[GroupLore],
+    evaluation: GeminiSessionEvaluation,
+) -> GroupLore:
+    """Sintetiza chistes internos, entidades externas y anécdotas compartidas."""
+    prev_jokes = prev_lore.inside_jokes if prev_lore else []
+    prev_entities = prev_lore.external_entities if prev_lore else []
+    prev_anecdotes = prev_lore.notable_anecdotes if prev_lore else []
+
+    return GroupLore(
+        inside_jokes=merge_unique_strings(prev_jokes, evaluation.inside_jokes, max_items=15),
+        external_entities=merge_unique_strings(prev_entities, evaluation.external_entities, max_items=15),
+        notable_anecdotes=merge_unique_strings(prev_anecdotes, evaluation.notable_anecdotes, max_items=10),
+    )
+
+
+def synthesize_emotional_triggers(
+    prev_triggers: Optional[EmotionalTriggers],
+    evaluation: GeminiSessionEvaluation,
+) -> EmotionalTriggers:
+    """Sintetiza disparadores de quejas/tilteo y temas de hiperfoco apasionado."""
+    prev_tilts = prev_triggers.tilts if prev_triggers else []
+    prev_hyper = prev_triggers.hyperfocus_topics if prev_triggers else []
+
+    return EmotionalTriggers(
+        tilts=merge_unique_strings(prev_tilts, evaluation.tilts, max_items=10),
+        hyperfocus_topics=merge_unique_strings(prev_hyper, evaluation.hyperfocus_topics, max_items=10),
+    )
+
+
+def synthesize_activity_initiative(
+    prev_init: Optional[ActivityInitiative],
+    evaluation: GeminiSessionEvaluation,
+) -> ActivityInitiative:
+    """Sintetiza nivel de iniciativa en juegos y permanencia en la llamada."""
+    prev_proposals = prev_init.typical_proposals if prev_init else []
+    proposals = merge_unique_strings(prev_proposals, evaluation.typical_proposals, max_items=8)
+
+    is_initiator = (
+        evaluation.initiative_level == "iniciador"
+        or (prev_init is not None and prev_init.initiative_level == "iniciador")
+    )
+    init_level = "iniciador" if is_initiator else evaluation.initiative_level
+
+    proposes = (prev_init.proposes_activities if prev_init else False) or evaluation.proposes_activities
+    departure = prev_init.departure_pattern if prev_init else "variable"
+
+    return ActivityInitiative(
+        initiative_level=init_level,
+        proposes_activities=proposes,
+        departure_pattern=departure,
+        typical_proposals=proposals,
+    )
+
+
+def synthesize_temporal_patterns(
+    prev_temporal: Optional[TemporalPatterns],
+    evaluation: GeminiSessionEvaluation,
+    social_temporal_metrics: Optional[SessionSocialTemporalMetrics],
+) -> TemporalPatterns:
+    """Sintetiza cronotipo, horarios pico y comportamiento de madrugada."""
+    prev_peaks = prev_temporal.peak_hours if prev_temporal else []
+    new_peaks = [social_temporal_metrics.hour_category] if social_temporal_metrics else []
+    peaks = merge_unique_strings(prev_peaks, new_peaks, max_items=4)
+
+    cronotype = prev_temporal.cronotype if prev_temporal else "vespertino"
+    if social_temporal_metrics:
+        h = social_temporal_metrics.session_hour
+        if 0 <= h < 6:
+            cronotype = "noctambulo"
+        elif 6 <= h < 14:
+            cronotype = "madrugador"
+        else:
+            cronotype = "vespertino"
+
+    attitude = evaluation.late_night_attitude or (prev_temporal.late_night_attitude if prev_temporal else None)
+
+    return TemporalPatterns(
+        cronotype=cronotype,
+        peak_hours=peaks,
+        late_night_attitude=attitude,
+    )
+
+
 class ProfileSynthesizer:
     def __init__(self, storage_dir: str):
         self.storage_dir = os.path.abspath(storage_dir)
@@ -108,6 +258,7 @@ class ProfileSynthesizer:
         session_id: str,
         session_metrics: ConversationalMetrics,
         evaluation: GeminiSessionEvaluation,
+        social_temporal_metrics: Optional[SessionSocialTemporalMetrics] = None,
     ) -> UserProfile:
         """
         Sintetiza la evaluación de una sesión con el historial acumulado del usuario.
@@ -165,6 +316,12 @@ class ProfileSynthesizer:
                 discourse_fillers=list(dict.fromkeys(evaluation.discourse_fillers)),
             )
 
+            social_dyn = synthesize_social_dynamics(None, evaluation, social_temporal_metrics)
+            group_lore = synthesize_group_lore(None, evaluation)
+            emot_triggers = synthesize_emotional_triggers(None, evaluation)
+            activity_init = synthesize_activity_initiative(None, evaluation)
+            temp_patterns = synthesize_temporal_patterns(None, evaluation, social_temporal_metrics)
+
             profile = UserProfile(
                 version="1.0.0",
                 user_id=user_id,
@@ -177,6 +334,11 @@ class ProfileSynthesizer:
                 group_role=group_role,
                 dialect_markers=dialect_markers,
                 clean_voice_samples=clean_samples,
+                social_dynamics=social_dyn,
+                group_lore=group_lore,
+                emotional_triggers=emot_triggers,
+                activity_initiative=activity_init,
+                temporal_patterns=temp_patterns,
             )
         else:
             # Caso 2: Sesión N (actualización incremental continua)
@@ -254,6 +416,13 @@ class ProfileSynthesizer:
             # 5. Muestras combinadas
             all_samples = sorted(list(set(existing.clean_voice_samples + clean_samples)))
 
+            # 6. Nuevas dimensiones comportamentales
+            social_dyn = synthesize_social_dynamics(existing.social_dynamics, evaluation, social_temporal_metrics)
+            group_lore = synthesize_group_lore(existing.group_lore, evaluation)
+            emot_triggers = synthesize_emotional_triggers(existing.emotional_triggers, evaluation)
+            activity_init = synthesize_activity_initiative(existing.activity_initiative, evaluation)
+            temp_patterns = synthesize_temporal_patterns(existing.temporal_patterns, evaluation, social_temporal_metrics)
+
             profile = UserProfile(
                 version="1.0.0",
                 user_id=user_id,
@@ -269,6 +438,11 @@ class ProfileSynthesizer:
                 group_role=group_role,
                 dialect_markers=dialect_markers,
                 clean_voice_samples=all_samples,
+                social_dynamics=social_dyn,
+                group_lore=group_lore,
+                emotional_triggers=emot_triggers,
+                activity_initiative=activity_init,
+                temporal_patterns=temp_patterns,
             )
 
         # Guardado atómico en storage/profiles/<user_id>/profile.json

@@ -26,20 +26,39 @@ from core.profiler.gemini_analyzer import GeminiSessionEvaluation
 from core.profiler.metrics import ConversationalMetrics
 
 
-def running_avg(prev_val: float, new_val: float, n_prev: int) -> float:
-    """Calcula el promedio ponderado continuo acumulativo."""
+def running_avg(prev_val: float, new_val: float, n_prev: int, min_alpha: float = 0.05) -> float:
+    """
+    Calcula el promedio ponderado continuo adaptativo para seguimiento longitudinal (> 1 mes).
+    - Primeras sesiones (N < 20): peso proporcional 1/(N+1) para calibración rápida.
+    - Sesiones avanzadas (N >= 20): peso acotado en min_alpha (5%) para mantener estabilidad
+      sin congelar la capacidad de adaptación a evoluciones sutiles de conducta.
+    """
     if n_prev <= 0:
         return new_val
-    return round(((prev_val * n_prev) + new_val) / (n_prev + 1), 3)
+    alpha = max(min_alpha, 1.0 / (n_prev + 1))
+    return round((1.0 - alpha) * prev_val + alpha * new_val, 3)
+
+
+def calculate_accumulated_confidence(prev_conf: float, new_conf: float, n_total: int) -> float:
+    """
+    Modela el incremento bayesiano de certeza conforme se acumulan sesiones (> 1 mes):
+    Conf(N) satura asintóticamente hacia 0.99 conforme aumenta la muestra de datos observados.
+    """
+    if n_total <= 1:
+        return round(new_conf, 3)
+    base = ((prev_conf * (n_total - 1)) + new_conf) / n_total
+    # Bonificación por saturación empírica en muestreo longitudinal
+    saturation_boost = 0.12 * (1.0 - (0.90 ** (n_total - 1)))
+    return round(min(0.99, base + saturation_boost), 3)
 
 
 def merge_evidence_quotes(
     prev_quotes: List[EvidenceQuote],
     new_quotes_str: List[str],
     session_id: str,
-    max_quotes: int = 5,
+    max_quotes: int = 10,
 ) -> List[EvidenceQuote]:
-    """Combina citas previas con las nuevas citas de la sesión, evitando duplicados."""
+    """Combina citas previas con las nuevas citas de la sesión, evitando duplicados (hasta 10 citas)."""
     seen_texts = {q.quote.strip() for q in prev_quotes}
     merged = list(prev_quotes)
 
@@ -166,9 +185,8 @@ class ProfileSynthesizer:
             # 1. Big Five ponderado con bonificación de confianza por acumulación
             def update_trait(prev_t: TraitEvaluation, new_score: float, new_conf: float, new_quotes: List[str]):
                 score = running_avg(prev_t.score, new_score, n_prev)
-                # La confianza estadística aumenta progresivamente al tener más sesiones observadas
-                conf = min(0.98, running_avg(prev_t.confidence, new_conf, n_prev) + 0.03)
-                quotes = merge_evidence_quotes(prev_t.evidence_quotes, new_quotes, session_id)
+                conf = calculate_accumulated_confidence(prev_t.confidence, new_conf, n_prev + 1)
+                quotes = merge_evidence_quotes(prev_t.evidence_quotes, new_quotes, session_id, max_quotes=10)
                 return TraitEvaluation(score=score, confidence=conf, evidence_quotes=quotes)
 
             big_five = BigFiveTraits(

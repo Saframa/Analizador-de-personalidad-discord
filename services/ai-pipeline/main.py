@@ -235,12 +235,46 @@ def process_session(
     return transcript
 
 
+def cleanup_session_audio(session_dir: str) -> int:
+    """
+    Elimina los archivos pesados de audio en raw_sessions/<session_id>/audio/
+    luego de que la sesión fue completamente transcripta, curada y analizada.
+    Conserva transcript.json, session_metadata.json y las muestras de referencia en storage/clean_samples/.
+    Retorna la cantidad de bytes liberados.
+    """
+    audio_dir = os.path.join(session_dir, "audio")
+    if not os.path.exists(audio_dir):
+        return 0
+
+    purged_bytes = 0
+    count = 0
+    for filename in os.listdir(audio_dir):
+        fp = os.path.join(audio_dir, filename)
+        if os.path.isfile(fp) and not filename.startswith("."):
+            purged_bytes += os.path.getsize(fp)
+            os.remove(fp)
+            count += 1
+
+    if count > 0:
+        receipt_path = os.path.join(audio_dir, ".purged")
+        with open(receipt_path, "w", encoding="utf-8") as f:
+            f.write(
+                f"Audio purgado exitosamente tras transcripción y perfilado el {datetime.now(timezone.utc).isoformat()}.\n"
+                f"Archivos eliminados: {count} ({purged_bytes / (1024**2):.2f} MB liberados de disco).\n"
+            )
+        print(f"\n[LIMPIEZA DE DISCO] Audio raw purgado: {count} archivos eliminados ({purged_bytes / (1024**2):.2f} MB liberados).")
+        print(f"                   Las transcripciones y muestras limpias de referencia (60s) se preservan intactas.")
+
+    return purged_bytes
+
+
 def profile_session(
     session_dir: str,
     base_storage_dir: str,
-    model_name: str = "gemini-2.5-flash",
+    model_name: str = "gemini-flash-latest",
     mock: bool = False,
     target_user_id: Optional[str] = None,
+    cleanup_audio: bool = True,
 ) -> List[UserProfile]:
     """
     Ejecuta el análisis de personalidad y perfilado psicológico con Gemini API
@@ -316,6 +350,10 @@ def profile_session(
         print(f"         - Cita de evidencia: \"{sample_cite}\"")
         print(f"         - Guardado en: storage/profiles/{user_id}/profile.json")
 
+    # Limpieza automática del audio raw para ahorrar espacio si está habilitado
+    if cleanup_audio:
+        cleanup_session_audio(session_dir)
+
     print("\n" + "=" * 65)
     print("🎉 PERFILADO COMPLETADO CON EXITO")
     print("=" * 65)
@@ -352,6 +390,11 @@ def main():
         help="Ejecuta automáticamente el perfilado de personalidad luego de la transcripción",
     )
     process_parser.add_argument(
+        "--delete-audio",
+        action="store_true",
+        help="Elimina los audios pesados luego de transcribir y curar las muestras",
+    )
+    process_parser.add_argument(
         "--storage-dir",
         type=str,
         default="",
@@ -369,8 +412,8 @@ def main():
     profile_parser.add_argument(
         "--model",
         type=str,
-        default="gemini-2.5-flash",
-        help="Modelo de Gemini a utilizar (ej. gemini-2.5-flash, gemini-2.5-pro)",
+        default="gemini-flash-latest",
+        help="Modelo de Gemini a utilizar (ej. gemini-flash-latest, gemini-2.5-flash)",
     )
     profile_parser.add_argument(
         "--user-id",
@@ -382,6 +425,11 @@ def main():
         "--mock",
         action="store_true",
         help="Fuerza el modo mock local/offline sin consumir cuota de API de Gemini",
+    )
+    profile_parser.add_argument(
+        "--keep-audio",
+        action="store_true",
+        help="Conserva los archivos de audio en disco en lugar de eliminarlos tras el análisis",
     )
     profile_parser.add_argument(
         "--storage-dir",
@@ -409,7 +457,10 @@ def main():
             profile_session(
                 session_dir=session_path,
                 base_storage_dir=base_storage,
+                cleanup_audio=args.delete_audio,
             )
+        elif args.delete_audio:
+            cleanup_session_audio(session_path)
 
     elif args.command == "profile":
         profile_session(
@@ -418,6 +469,7 @@ def main():
             model_name=args.model,
             mock=args.mock,
             target_user_id=args.user_id,
+            cleanup_audio=not args.keep_audio,
         )
 
 

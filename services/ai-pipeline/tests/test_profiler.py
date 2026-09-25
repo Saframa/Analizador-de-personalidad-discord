@@ -168,3 +168,64 @@ def test_profile_synthesizer_lifecycle(sample_transcript, tmp_path):
     # Verificar que el perfil actualizado siga cumpliendo el JSON Schema
     data_2 = json.loads(profile_2.model_dump_json())
     jsonschema.validate(instance=data_2, schema=schema)
+
+
+def test_adaptive_running_avg_longitudinal():
+    # En sesión 1 (n_prev=0): adopta el nuevo valor
+    assert running_avg(0.5, 0.8, 0) == 0.8
+
+    # En sesión 5 (n_prev=4): peso = 1/5 = 0.20
+    val_5 = running_avg(0.5, 1.0, 4)
+    assert val_5 == 0.6  # 0.8 * 0.5 + 0.2 * 1.0 = 0.6
+
+    # En sesión 50 (n_prev=49): peso acotado en min_alpha (0.05) para plasticidad a largo plazo
+    val_50 = running_avg(0.5, 1.0, 49)
+    assert val_50 == 0.525  # 0.95 * 0.5 + 0.05 * 1.0 = 0.525
+
+
+def test_calculate_accumulated_confidence_asymptotic():
+    from core.profiler.profile_synthesizer import calculate_accumulated_confidence
+
+    # Sesión 1: confianza inicial
+    c1 = calculate_accumulated_confidence(0.70, 0.70, 1)
+    assert c1 == 0.70
+
+    # Sesión 5: confianza acumulada crece
+    c5 = calculate_accumulated_confidence(0.70, 0.75, 5)
+    assert c5 > 0.75
+
+    # Sesión 30 (más de 1 mes de llamadas): certeza satura cerca de 0.99
+    c30 = calculate_accumulated_confidence(0.85, 0.85, 30)
+    assert c30 >= 0.95
+    assert c30 <= 0.99
+
+
+def test_cleanup_session_audio(tmp_path):
+    from main import cleanup_session_audio
+
+    # Crear estructura simulada de sesión
+    session_dir = tmp_path / "2026-09-25_test"
+    audio_dir = session_dir / "audio"
+    audio_dir.mkdir(parents=True)
+
+    track1 = audio_dir / "user1.wav"
+    track2 = audio_dir / "user2.wav"
+    track1.write_bytes(b"A" * 1024)
+    track2.write_bytes(b"B" * 2048)
+
+    transcript_file = session_dir / "transcript.json"
+    transcript_file.write_text('{"test": true}', encoding="utf-8")
+
+    # Ejecutar limpieza
+    freed_bytes = cleanup_session_audio(str(session_dir))
+    assert freed_bytes == 3072
+
+    # Verificar que los archivos .wav fueron borrados
+    assert not track1.exists()
+    assert not track2.exists()
+
+    # Verificar que el marcador .purged fue creado
+    assert (audio_dir / ".purged").exists()
+
+    # Verificar que transcript.json sigue intacto
+    assert transcript_file.exists()

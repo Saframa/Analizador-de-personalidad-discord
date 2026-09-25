@@ -2,3 +2,12 @@
 pydantic>=2.5.0
 pytest>=8.0.0
 jsonschema>=4.20.0
+
+# Pipeline de Audio y Deep Learning (Fase 2)
+# torch y torchaudio se instalan con cu124: --index-url https://download.pytorch.org/whl/cu124
+faster-whisper>=1.0.0
+silero-vad>=6.0.0
+pyloudnorm>=0.2.0
+scipy>=1.10.0
+soundfile>=0.12.0
+av>=11.0.0

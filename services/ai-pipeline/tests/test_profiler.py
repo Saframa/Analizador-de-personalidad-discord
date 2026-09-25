@@ -229,3 +229,21 @@ def test_cleanup_session_audio(tmp_path):
 
     # Verificar que transcript.json sigue intacto
     assert transcript_file.exists()
+
+
+def test_create_daily_backup(tmp_path):
+    from main import create_daily_backup
+
+    # Simular profiles_dir
+    profiles_dir = tmp_path / "profiles" / "12345"
+    profiles_dir.mkdir(parents=True)
+    (profiles_dir / "profile.json").write_text('{"user_id": "12345"}', encoding="utf-8")
+
+    backup_path = create_daily_backup(str(tmp_path))
+    assert backup_path is not None
+    assert os.path.exists(backup_path)
+    assert backup_path.endswith(".zip")
+
+    # Llamar de nuevo hoy debe retornar el mismo archivo existente
+    second_call = create_daily_backup(str(tmp_path))
+    assert second_call == backup_path

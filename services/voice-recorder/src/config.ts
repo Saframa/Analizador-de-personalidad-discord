@@ -10,6 +10,7 @@ const ConfigSchema = z.object({
   GUILD_ID: z.string().optional(),
   MIN_USERS_TO_RECORD: z.coerce.number().int().min(1).default(2),
   DEBOUNCE_LEAVE_SECONDS: z.coerce.number().int().min(1).default(15),
+  ROTATION_INTERVAL_MINUTES: z.coerce.number().int().min(1).default(15),
   STORAGE_DIR: z.string().default('../../storage'),
 });
 
@@ -27,6 +28,7 @@ export interface AppConfig {
   GUILD_ID?: string;
   MIN_USERS_TO_RECORD: number;
   DEBOUNCE_LEAVE_SECONDS: number;
+  ROTATION_INTERVAL_MINUTES: number;
   STORAGE_DIR: string;
 }
 
@@ -36,5 +38,6 @@ export const config: AppConfig = {
   GUILD_ID: parsed.success ? parsed.data.GUILD_ID : process.env.GUILD_ID,
   MIN_USERS_TO_RECORD: parsed.success ? parsed.data.MIN_USERS_TO_RECORD : 2,
   DEBOUNCE_LEAVE_SECONDS: parsed.success ? parsed.data.DEBOUNCE_LEAVE_SECONDS : 15,
+  ROTATION_INTERVAL_MINUTES: parsed.success ? parsed.data.ROTATION_INTERVAL_MINUTES : 15,
   STORAGE_DIR: path.resolve(process.cwd(), parsed.success ? parsed.data.STORAGE_DIR : (process.env.STORAGE_DIR || '../../storage')),
 };

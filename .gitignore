@@ -42,6 +42,12 @@ storage/profiles/*
 storage/twin_outputs/*
 !storage/twin_outputs/.gitkeep
 
+storage/backups/*
+!storage/backups/.gitkeep
+
+storage/logs/*
+!storage/logs/.gitkeep
+
 # Checkpoints y Pesos de Modelos Locales (Whisper, XTTS, F5-TTS)
 models/
 *.pt
@@ -68,7 +74,7 @@ Thumbs.db
 
 # Logs y Archivos Temporales
 *.log
-logs/
+/logs/
 temp/
 tmp/
 *.tmp

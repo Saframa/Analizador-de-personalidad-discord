@@ -27,6 +27,7 @@ const presenceWatcher = new PresenceWatcher(client, sessionManager);
 client.once(Events.ClientReady, async (readyClient) => {
   console.log(`✅ Bot conectado exitosamente como: ${readyClient.user.tag}`);
   console.log(`👀 Vigilando canales de voz (Entrada: >= ${config.MIN_USERS_TO_RECORD} personas, Debounce: ${config.DEBOUNCE_LEAVE_SECONDS}s)`);
+  console.log(`⏱️  Rotación de bloques continuos: cada ${config.ROTATION_INTERVAL_MINUTES} minutos (Rolling Sessions)`);
   console.log(`📁 Directorio de almacenamiento: ${config.STORAGE_DIR}`);
 
   // Escanear si ya hay canales con gente hablando al momento de iniciar
@@ -49,6 +50,15 @@ const handleShutdown = async (signal: string) => {
 
 process.on('SIGINT', () => handleShutdown('SIGINT'));
 process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+
+// Prevención de caídas silenciosas por errores de socket o promesas no capturadas
+process.on('uncaughtException', (err) => {
+  console.error('🚨 [VoiceRecorder] Excepción no capturada capturada por guardián:', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('⚠️ [VoiceRecorder] Promesa rechazada no manejada:', reason);
+});
 
 client.login(config.DISCORD_TOKEN).catch((err) => {
   console.error('❌ Error fatal al conectar con la API de Discord:');

@@ -14,11 +14,15 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import logging
+from logging.handlers import RotatingFileHandler
 import os
 import sys
 import time
+import traceback
 from datetime import datetime, timezone
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
+import zipfile
 
 # Asegurar importación de core
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -58,8 +62,86 @@ load_dotenv(os.path.join(CURRENT_DIR, "..", "voice-recorder", ".env"))
 # Configurar stdout/stderr en UTF-8 para Windows
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+logger = logging.getLogger("ai_pipeline")
+
+
+def setup_logging(base_storage_dir: str) -> logging.Logger:
+    """Configura logging profesional rotativo en archivo (logs/pipeline.log) y en consola."""
+    logs_dir = os.path.join(base_storage_dir, "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    log_file = os.path.join(logs_dir, "pipeline.log")
+
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        formatter = logging.Formatter(
+            fmt="[%(asctime)s] [%(levelname)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+
+        # Handler de archivo rotativo (10 MB por archivo, conserva 5 archivos históricos)
+        file_handler = RotatingFileHandler(
+            log_file,
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(logging.INFO)
+        logger.addHandler(file_handler)
+
+        # Handler de consola
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        console_handler.setLevel(logging.INFO)
+        logger.addHandler(console_handler)
+
+    return logger
+
+
+def create_daily_backup(base_storage_dir: str) -> Optional[str]:
+    """
+    Genera automáticamente una copia de seguridad comprimida diaria de storage/profiles/
+    en storage/backups/profiles_backup_YYYY-MM-DD.zip.
+    Elimina copias con más de 30 días de antigüedad para no ocupar espacio.
+    """
+    profiles_dir = os.path.join(base_storage_dir, "profiles")
+    if not os.path.exists(profiles_dir):
+        return None
+
+    backups_dir = os.path.join(base_storage_dir, "backups")
+    os.makedirs(backups_dir, exist_ok=True)
+
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    backup_filename = f"profiles_backup_{today_str}.zip"
+    backup_filepath = os.path.join(backups_dir, backup_filename)
+
+    # Si ya se generó el backup de hoy, no duplicar trabajo
+    if os.path.exists(backup_filepath):
+        return backup_filepath
+
+    try:
+        with zipfile.ZipFile(backup_filepath, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, _, files in os.walk(profiles_dir):
+                for f in files:
+                    full_p = os.path.join(root, f)
+                    rel_p = os.path.relpath(full_p, profiles_dir)
+                    zf.write(full_p, rel_p)
+
+        logger.info(f"💾 [BACKUP DIARIO] Copia de seguridad generada: storage/backups/{backup_filename}")
+
+        # Purgar backups con más de 30 días
+        now_ts = time.time()
+        for bf in glob.glob(os.path.join(backups_dir, "profiles_backup_*.zip")):
+            if os.path.isfile(bf):
+                age_days = (now_ts - os.path.getmtime(bf)) / 86400.0
+                if age_days > 30.0:
+                    os.remove(bf)
+                    logger.info(f"🧹 [BACKUP ROTADO] Eliminada copia antigua ({age_days:.0f} días): {os.path.basename(bf)}")
+
+        return backup_filepath
+    except Exception as e:
+        logger.warning(f"⚠️ [BACKUP] No se pudo crear copia de seguridad diaria: {e}")
+        return None
 
 
 def resolve_session_path(session_arg: str, base_storage_dir: str) -> str:
@@ -587,67 +669,109 @@ def watch_sessions(
     if not os.path.exists(raw_sessions_dir):
         os.makedirs(raw_sessions_dir, exist_ok=True)
 
-    print("\n" + "=" * 65)
-    print("👀 MODO VIGILANTE AUTÓNOMO (WATCHER) INICIADO")
-    print(f"📁 Monitoreando directorio:  {raw_sessions_dir}")
-    print(f"⏱️  Intervalo de sondeo:     {interval}s")
-    print(f"🧠 Perfilado Gemini:        {'ACTIVO' if profile else 'Desactivado'}")
-    print(f"🧹 Limpieza de disco:       {'ACTIVA (se liberará el audio tras perfilar)' if delete_audio else 'Desactivada'}")
-    print(f"🎙️ Modelo STT:              faster-whisper ({model_size})")
-    print("=" * 65)
-    print("El sistema procesará automáticamente cualquier llamada apenas termine.")
-    print("Presiona Ctrl+C en cualquier momento para detener el vigilante.\n")
+    log = setup_logging(base_storage_dir)
 
-    while True:
+    log.info("=" * 65)
+    log.info("👀 MODO VIGILANTE AUTÓNOMO (WATCHER) INICIADO")
+    log.info(f"📁 Monitoreando directorio:  {raw_sessions_dir}")
+    log.info(f"⏱️  Intervalo de sondeo:     {interval}s")
+    log.info(f"🧠 Perfilado Gemini:        {'ACTIVO' if profile else 'Desactivado'}")
+    log.info(f"🧹 Limpieza de disco:       {'ACTIVA (audio purgado tras perfilar)' if delete_audio else 'Desactivada'}")
+    log.info(f"🎙️ Modelo STT:              faster-whisper ({model_size})")
+    log.info("=" * 65)
+    log.info("El sistema procesará automáticamente cualquier llamada apenas termine.")
+    log.info("Presiona Ctrl+C en cualquier momento para detener el vigilante.\n")
+
+    # Win32 Anti-Suspensión: evitar que Windows suspenda la CPU/GPU durante la vigilancia 24/7
+    if sys.platform == "win32":
         try:
-            candidates = sorted(glob.glob(os.path.join(raw_sessions_dir, "*")))
-            for session_dir in candidates:
-                if not os.path.isdir(session_dir):
-                    continue
-                meta_file = os.path.join(session_dir, "session_metadata.json")
-                if not os.path.exists(meta_file):
-                    continue
+            import ctypes
+            # ES_CONTINUOUS (0x80000000) | ES_SYSTEM_REQUIRED (0x00000001)
+            ctypes.windll.kernel32.SetThreadExecutionState(0x80000000 | 0x00000001)
+            log.info("🛡️ [Windows Power] Prevención de suspensión de energía activada (SetThreadExecutionState).")
+        except Exception as e:
+            log.warning(f"⚠️ [Windows Power] No se pudo activar SetThreadExecutionState: {e}")
 
-                transcript_file = os.path.join(session_dir, "transcript.json")
-                audio_dir = os.path.join(session_dir, "audio")
-                purged_file = os.path.join(audio_dir, ".purged")
+    try:
+        while True:
+            try:
+                # Comprobar si corresponde generar el backup diario de perfiles
+                create_daily_backup(base_storage_dir)
 
-                # Verificar si tiene audio pendiente y no fue purgada
-                if os.path.exists(audio_dir) and not os.path.exists(purged_file):
-                    try:
-                        with open(meta_file, "r", encoding="utf-8") as f:
-                            meta = json.load(f)
-                        if not meta.get("ended_at"):
-                            continue  # Llamada aún en curso en Discord
-                    except Exception:
+                candidates = sorted(glob.glob(os.path.join(raw_sessions_dir, "*")))
+                for session_dir in candidates:
+                    if not os.path.isdir(session_dir):
+                        continue
+                    meta_file = os.path.join(session_dir, "session_metadata.json")
+                    if not os.path.exists(meta_file):
                         continue
 
-                    session_id = os.path.basename(session_dir)
-                    print(f"\n🔔 [NUEVA LLAMADA DETECTADA: {session_id}]")
-                    if not os.path.exists(transcript_file):
-                        process_session(
-                            session_dir=session_dir,
-                            model_size=model_size,
-                            curate_samples=True,
-                            base_storage_dir=base_storage_dir,
-                        )
-                    if profile:
-                        profile_session(
-                            session_dir=session_dir,
-                            base_storage_dir=base_storage_dir,
-                            cleanup_audio=delete_audio,
-                        )
-                    elif delete_audio:
-                        cleanup_session_audio(session_dir)
-                    print(f"✅ [LLAMADA {session_id} COMPLETADA - AUDIO PURGADO]\n")
+                    transcript_file = os.path.join(session_dir, "transcript.json")
+                    audio_dir = os.path.join(session_dir, "audio")
+                    purged_file = os.path.join(audio_dir, ".purged")
+                    failed_file = os.path.join(audio_dir, ".failed")
 
-            time.sleep(interval)
-        except (KeyboardInterrupt, EOFError):
-            print("\n🛑 Vigilante detenido por el usuario.\n")
-            break
-        except Exception as e:
-            print(f"⚠️ Error en ciclo de vigilancia: {e}")
-            time.sleep(interval)
+                    # Verificar si tiene audio pendiente y no fue purgada ni está en cuarentena
+                    if os.path.exists(audio_dir) and not os.path.exists(purged_file) and not os.path.exists(failed_file):
+                        try:
+                            with open(meta_file, "r", encoding="utf-8") as f:
+                                meta = json.load(f)
+                            if not meta.get("ended_at"):
+                                continue  # Llamada aún en curso en Discord
+                        except Exception:
+                            continue
+
+                        session_id = os.path.basename(session_dir)
+                        log.info(f"\n🔔 [NUEVA LLAMADA DETECTADA: {session_id}]")
+
+                        try:
+                            if not os.path.exists(transcript_file):
+                                process_session(
+                                    session_dir=session_dir,
+                                    model_size=model_size,
+                                    curate_samples=True,
+                                    base_storage_dir=base_storage_dir,
+                                )
+                            if profile:
+                                profile_session(
+                                    session_dir=session_dir,
+                                    base_storage_dir=base_storage_dir,
+                                    cleanup_audio=delete_audio,
+                                )
+                            elif delete_audio:
+                                cleanup_session_audio(session_dir)
+
+                            # Ejecutar backup de seguridad tras actualizar perfiles
+                            create_daily_backup(base_storage_dir)
+                            log.info(f"✅ [LLAMADA {session_id} COMPLETADA - AUDIO PURGADO]\n")
+
+                        except Exception as proc_err:
+                            tb = traceback.format_exc()
+                            fail_receipt = os.path.join(audio_dir, ".failed")
+                            try:
+                                with open(fail_receipt, "w", encoding="utf-8") as ff:
+                                    ff.write(f"Timestamp: {datetime.now(timezone.utc).isoformat()}\n")
+                                    ff.write(f"Error: {proc_err}\n\n")
+                                    ff.write(tb)
+                            except Exception:
+                                pass
+                            log.error(f"🚨 [CUARENTENA] Sesión {session_id} falló durante el procesamiento. Apartada con marca .failed: {proc_err}")
+
+                time.sleep(interval)
+            except (KeyboardInterrupt, EOFError):
+                raise
+            except Exception as e:
+                log.warning(f"⚠️ Error en ciclo de vigilancia: {e}")
+                time.sleep(interval)
+    except (KeyboardInterrupt, EOFError):
+        log.info("\n🛑 Vigilante detenido por el usuario.\n")
+    finally:
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                ctypes.windll.kernel32.SetThreadExecutionState(0x80000000)
+            except Exception:
+                pass
 
 
 def handle_user_command(args, base_storage_dir: str):

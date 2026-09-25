@@ -7,7 +7,8 @@ protocolo anti-alucinaciones con citas textuales obligatorias y modo mock offlin
 from __future__ import annotations
 
 import os
-from typing import List, Optional
+import time
+from typing import Any, List, Optional
 from pydantic import BaseModel, Field
 
 from core.contracts.models import (
@@ -168,21 +169,31 @@ REGLAS CRÍTICAS:
 4. Si el usuario habló poco o no hay suficiente evidencia para un rasgo, pon confianza < 0.5 y score 0.5.
 """
 
-        try:
-            response = client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=RIOPLATENSE_SYSTEM_INSTRUCTIONS,
-                    response_mime_type="application/json",
-                    response_schema=GeminiSessionEvaluation,
-                    temperature=0.2,
-                ),
-            )
-            return response.parsed
-        except Exception as e:
-            print(f"⚠️  Aviso: Error en llamada a Gemini API ({e}). Usando análisis heurístico de respaldo.")
-            return self._mock_evaluation(transcript, target_user_id, target_username, metrics)
+        # Reintentos exponenciales automáticos ante microcortes de red o rate-limits temporales
+        max_retries = 3
+        backoff_delays = [2.0, 6.0, 15.0]
+
+        for attempt in range(max_retries):
+            try:
+                response = client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=RIOPLATENSE_SYSTEM_INSTRUCTIONS,
+                        response_mime_type="application/json",
+                        response_schema=GeminiSessionEvaluation,
+                        temperature=0.2,
+                    ),
+                )
+                return response.parsed
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    wait_sec = backoff_delays[attempt]
+                    print(f"⚠️  [Gemini Retry] Intento {attempt + 1}/{max_retries} falló ({e}). Reintentando en {wait_sec:.0f}s...")
+                    time.sleep(wait_sec)
+                else:
+                    print(f"❌ [Gemini Error] Tras {max_retries} intentos falló la API ({e}). Usando análisis heurístico de respaldo.")
+                    return self._mock_evaluation(transcript, target_user_id, target_username, metrics)
 
     def _mock_evaluation(
         self,

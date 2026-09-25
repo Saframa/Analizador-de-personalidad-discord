@@ -16,8 +16,10 @@ export class SessionManager {
   private currentSessionDir: string | null = null;
   private startedAt: Date | null = null;
   private channel: VoiceBasedChannel | null = null;
+  private connection: VoiceConnection | null = null;
   private audioManager: AudioReceiverManager | null = null;
   private participantsMap: Map<string, Participant> = new Map();
+  private rotationTimer: NodeJS.Timeout | null = null;
 
   /**
    * Genera el ID de sesión en formato estricto YYYY-MM-DD_HH-mm-ss
@@ -62,6 +64,7 @@ export class SessionManager {
     this.currentSessionDir = sessionDir;
     this.startedAt = now;
     this.channel = channel;
+    this.connection = connection;
     this.participantsMap.clear();
 
     // Registrar participantes humanos presentes en el canal
@@ -83,6 +86,9 @@ export class SessionManager {
     for (const [userId] of this.participantsMap) {
       this.audioManager.subscribeUser(userId);
     }
+
+    // Iniciar temporizador de rotación periódica para tolerancia a fallos
+    this.startRotationTimer();
 
     console.log(`🎙️ [SessionManager] Sesión iniciada: ${sessionId} en canal '${channel.name}' con ${this.participantsMap.size} participantes.`);
     return sessionId;
@@ -177,14 +183,75 @@ export class SessionManager {
 
     console.log(`✅ [SessionManager] Metadata guardada atómicamente en: ${metadataFilePath}`);
 
+    // Detener timer de rotación
+    this.stopRotationTimer();
+
     // Limpiar estado
     this.currentSessionId = null;
     this.currentSessionDir = null;
     this.startedAt = null;
     this.channel = null;
+    this.connection = null;
     this.audioManager = null;
     this.participantsMap.clear();
 
     return validatedMetadata;
+  }
+
+  /**
+   * Rota la sesión actual: finaliza el bloque actual y arranca el siguiente
+   * de forma inmediata y continua sin abandonar el canal de voz.
+   */
+  public async rotateSession(): Promise<SessionMetadata | null> {
+    if (!this.isRecording() || !this.channel || !this.connection) {
+      return null;
+    }
+
+    const currentChannel = this.channel;
+    const currentConnection = this.connection;
+
+    console.log(`🔄 [SessionManager] Rotando sesión tras ${config.ROTATION_INTERVAL_MINUTES}m para resiliencia y ahorro de disco...`);
+
+    // 1. Cerrar la sesión actual (escribe session_metadata.json y finaliza los archivos de audio)
+    const prevMetadata = await this.endSession();
+
+    // 2. Si todavía hay participantes humanos en el canal, iniciar inmediatamente el siguiente bloque
+    const humanCount = currentChannel.members.filter((m) => !m.user.bot).size;
+    if (humanCount >= config.MIN_USERS_TO_RECORD) {
+      console.log(`▶️ [SessionManager] Iniciando siguiente bloque de grabación en '${currentChannel.name}'...`);
+      await this.startSession(currentChannel, currentConnection);
+    } else {
+      console.log(`ℹ️ [SessionManager] Menos de ${config.MIN_USERS_TO_RECORD} usuarios presentes al rotar; el bot esperará o saldrá según debounce.`);
+    }
+
+    return prevMetadata;
+  }
+
+  /**
+   * Inicia el temporizador de rotación de bloques (Rolling Sessions).
+   */
+  private startRotationTimer(): void {
+    this.stopRotationTimer();
+    const intervalMs = (config.ROTATION_INTERVAL_MINUTES || 15) * 60 * 1000;
+    this.rotationTimer = setTimeout(async () => {
+      try {
+        if (this.isRecording()) {
+          console.log(`⏱️ [SessionManager] Cumplido bloque de ${config.ROTATION_INTERVAL_MINUTES}m.`);
+          await this.rotateSession();
+        }
+      } catch (err) {
+        console.error('❌ [SessionManager] Error en rotación periódica de sesión:', err);
+      }
+    }, intervalMs);
+  }
+
+  /**
+   * Cancela el temporizador de rotación activo.
+   */
+  private stopRotationTimer(): void {
+    if (this.rotationTimer) {
+      clearTimeout(this.rotationTimer);
+      this.rotationTimer = null;
+    }
   }
 }

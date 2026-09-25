@@ -59,6 +59,20 @@ load_dotenv(os.path.join(CURRENT_DIR, ".env"))
 load_dotenv(os.path.join(CURRENT_DIR, "..", "..", ".env"))
 load_dotenv(os.path.join(CURRENT_DIR, "..", "voice-recorder", ".env"))
 
+# Configurar ffmpeg en PATH global si existe imageio_ffmpeg
+try:
+    import imageio_ffmpeg
+    import shutil
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    ffmpeg_dir = os.path.dirname(ffmpeg_exe)
+    target_ffmpeg = os.path.join(ffmpeg_dir, "ffmpeg.exe")
+    if not os.path.exists(target_ffmpeg):
+        shutil.copyfile(ffmpeg_exe, target_ffmpeg)
+    if ffmpeg_dir not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+except Exception:
+    pass
+
 # Configurar stdout/stderr en UTF-8 para Windows
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")

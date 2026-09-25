@@ -29,18 +29,25 @@ def setup_tts_gpu_environment() -> None:
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
-    # Integración transparente de ffmpeg para pydub si está disponible
+    # Integración transparente de ffmpeg para pydub y transformers
     try:
         import imageio_ffmpeg
-        import pydub
+        import shutil
 
         ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
         ffmpeg_dir = os.path.dirname(ffmpeg_exe)
+        target_ffmpeg = os.path.join(ffmpeg_dir, "ffmpeg.exe")
+        if not os.path.exists(target_ffmpeg):
+            shutil.copyfile(ffmpeg_exe, target_ffmpeg)
         if ffmpeg_dir not in os.environ.get("PATH", ""):
             os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
-        pydub.AudioSegment.converter = ffmpeg_exe
-    except Exception:
-        pass
+        try:
+            import pydub
+            pydub.AudioSegment.converter = target_ffmpeg
+        except Exception:
+            pass
+    except Exception as e:
+        logger.warning(f"No se pudo configurar ffmpeg: {e}")
 
 
 def release_tts_gpu_memory(model=None) -> None:

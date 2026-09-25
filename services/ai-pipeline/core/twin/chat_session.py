@@ -81,9 +81,14 @@ class DigitalTwinChat:
             except Exception as e:
                 last_error = e
                 # Espera con retroceso exponencial breve ante picos de demanda (503/429)
-                time.sleep(1.5 * (attempt + 1))
-
         # Si agotó reintentos, generar respuesta de respaldo en personaje
+        if last_error:
+            if "RESOURCE_EXHAUSTED" in str(last_error):
+                print("\n⚠️  [Límite de API de Gemini alcanzado (429 Quota Exceeded)]")
+                print("   Se agotaron las solicitudes diarias gratuitas de tu API Key de Gemini.")
+                print("   Usando réplica estática offline de respaldo temporalmente.")
+            else:
+                print(f"\n⚠️  [Error de Gemini API: {last_error}] Usando réplica estática de respaldo.")
         fallback = self._mock_response(clean_input)
         self.history.append({"role": "assistant", "text": fallback})
         return fallback

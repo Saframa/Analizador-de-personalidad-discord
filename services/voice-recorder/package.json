@@ -1,0 +1,18 @@
+{
+  "name": "voice-recorder",
+  "version": "1.0.0",
+  "description": "Discord Voice Recording Service with Multi-User Audio Demuxing",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}

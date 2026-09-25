@@ -85,14 +85,46 @@ class GeminiProfiler:
         return f"{mins:02d}:{secs:02d}"
 
     def _prepare_transcript_context(
-        self, transcript: SessionTranscript, target_user_id: str
+        self,
+        transcript: SessionTranscript,
+        target_user_id: str,
+        threads: Optional[List[Any]] = None,
     ) -> str:
+        if not threads:
+            lines = []
+            for u in transcript.utterances:
+                ts = self._format_timestamp(u.start_time)
+                is_target = " [OBJETIVO DE ANALISIS]" if u.user_id == target_user_id else ""
+                overlap = f" (solapa con {', '.join(u.overlapping_speakers)})" if u.overlapping_speakers else ""
+                lines.append(f"[{ts}] {u.username}{is_target}: \"{u.text}\"{overlap}")
+            return "\n".join(lines)
+
+        # Cuando disponemos de hilos discursivos reconstruidos sin consumo de tokens
         lines = []
-        for u in transcript.utterances:
-            ts = self._format_timestamp(u.start_time)
-            is_target = " [OBJETIVO DE ANALISIS]" if u.user_id == target_user_id else ""
-            overlap = f" (solapa con {', '.join(u.overlapping_speakers)})" if u.overlapping_speakers else ""
-            lines.append(f"[{ts}] {u.username}{is_target}: \"{u.text}\"{overlap}")
+        turn_map = {}
+        for thread in threads:
+            for turn in thread.turns:
+                turn_map[turn.utterance_id] = turn
+
+        for thread in threads:
+            header = f"\n--- HILO CONVERSACIONAL #{thread.thread_id} | Dinámica: {thread.intent}"
+            if thread.keywords:
+                header += f" | Claves: {', '.join(thread.keywords)}"
+            header += " ---"
+            lines.append(header)
+
+            for turn in thread.turns:
+                ts = self._format_timestamp(turn.start_time)
+                is_target = " [OBJETIVO DE ANALISIS]" if turn.user_id == target_user_id else ""
+                reply_str = ""
+                if turn.reply_to_utterance_id and turn.reply_to_utterance_id in turn_map:
+                    parent_turn = turn_map[turn.reply_to_utterance_id]
+                    if parent_turn.user_id != turn.user_id:
+                        reply_str = f" [respondiendo a @{parent_turn.username}]"
+                    else:
+                        reply_str = " [continuación de su turno]"
+                lines.append(f"[{ts}] {turn.username}{is_target}{reply_str}: \"{turn.text}\"")
+
         return "\n".join(lines)
 
     def analyze_user_session(
@@ -101,6 +133,7 @@ class GeminiProfiler:
         target_user_id: str,
         target_username: str,
         metrics: ConversationalMetrics,
+        threads: Optional[List[Any]] = None,
     ) -> GeminiSessionEvaluation:
         """
         Envía el transcript y las métricas a Gemini para obtener el perfil estructurado.
@@ -112,7 +145,7 @@ class GeminiProfiler:
         from google.genai import types
 
         client = self._get_client()
-        dialogue = self._prepare_transcript_context(transcript, target_user_id)
+        dialogue = self._prepare_transcript_context(transcript, target_user_id, threads=threads)
 
         prompt = f"""
 Por favor, analiza la conducta, psicología y estilo de comunicación de {target_username} (ID: {target_user_id})
@@ -125,13 +158,14 @@ MÉTRICAS CUANTITATIVAS OBSERVADAS:
 - Proporción de interrupciones: {metrics.interruption_ratio:.2f}
 - Cadencia de locución: {metrics.cadence} ({metrics.words_per_second:.1f} palabras/segundo)
 
-TRANSCRIPCIÓN COMPLETA DE LA SESIÓN:
+TRANSCRIPCIÓN Y CONTEXTO DISCURSIVO DE LA SESIÓN:
 {dialogue}
 
 REGLAS CRÍTICAS:
 1. Recuerda la calibración rioplatense (chicanas, 'bo', 'ta', 'salado').
-2. CADA rasgo debe incluir citas textuales directas de las intervenciones de {target_username}.
-3. Si el usuario habló poco o no hay suficiente evidencia para un rasgo, pon confianza < 0.5 y score 0.5.
+2. Evalúa cómo interactúa y responde a otros interlocutores según el flujo conversacional.
+3. CADA rasgo debe incluir citas textuales directas de las intervenciones de {target_username}.
+4. Si el usuario habló poco o no hay suficiente evidencia para un rasgo, pon confianza < 0.5 y score 0.5.
 """
 
         try:

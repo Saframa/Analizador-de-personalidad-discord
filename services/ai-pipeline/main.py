@@ -31,10 +31,12 @@ from core.contracts.models import (
     UserProfile,
     Utterance,
 )
+from core.context.threader import DiscourseThreader
 from core.curator.voice_curator import VoiceCurator
 from core.profiler.gemini_analyzer import GeminiProfiler
 from core.profiler.metrics import compute_user_metrics
 from core.profiler.profile_synthesizer import ProfileSynthesizer
+from core.user_manager.manager import UserManager
 from core.stt.transcriber import WhisperTranscriber, release_gpu_memory
 from core.tts.cloner import get_voice_cloner, release_tts_gpu_memory
 from core.tts.player import play_audio_file
@@ -308,6 +310,11 @@ def profile_session(
     with open(transcript_file, "r", encoding="utf-8") as f:
         transcript = SessionTranscript.model_validate_json(f.read())
 
+    user_mgr = UserManager(base_storage_dir)
+    threader = DiscourseThreader(user_manager=user_mgr)
+    threads = threader.reconstruct_threads(transcript)
+    print(f"[1/4] Contexto conversacional reconstruido: {len(threads)} hilos detectados (0 tokens consumidos).")
+
     profiler = GeminiProfiler(model_name=model_name, mock=mock)
     synthesizer = ProfileSynthesizer(storage_dir=base_storage_dir)
     updated_profiles: List[UserProfile] = []
@@ -329,9 +336,15 @@ def profile_session(
               f"{metrics.avg_words_per_turn:.1f} pal/turno, cadencia '{metrics.cadence}', "
               f"interrupciones: {metrics.interruption_ratio*100:.1f}%")
 
-        # 2. Inferencia cualitativa / Gemini
+        # 2. Inferencia cualitativa / Gemini enriquecida con contexto de hilos
         print(f"      • Ejecutando análisis sociolingüístico y Big Five (modelo: {model_name} | mock={profiler.mock})...")
-        evaluation = profiler.analyze_user_session(transcript, user_id, participant.display_name, metrics)
+        evaluation = profiler.analyze_user_session(
+            transcript,
+            user_id,
+            participant.display_name,
+            metrics,
+            threads=threads,
+        )
 
         # 3. Síntesis acumulada
         profile = synthesizer.synthesize_profile(
@@ -637,6 +650,130 @@ def watch_sessions(
             time.sleep(interval)
 
 
+def handle_user_command(args, base_storage_dir: str):
+    """Maneja las operaciones del subcomando user (list, create, show, update)."""
+    user_mgr = UserManager(base_storage_dir)
+
+    if args.user_action == "list":
+        users = user_mgr.list_users()
+        if not users:
+            print("\n📭 No hay usuarios registrados en storage/profiles/.")
+            print("   Crea uno con: python main.py user create --user-id <id> --username <name>")
+            return
+
+        print("\n" + "=" * 95)
+        print("👥 USUARIOS Y PERFILES REGISTRADOS")
+        print("=" * 95)
+        print(f"{'ID':<20} | {'USERNAME':<15} | {'APODO / DISPLAY':<18} | {'ROL':<18} | {'VOZ'}")
+        print("-" * 95)
+        for u in users:
+            disp = u.display_name or "-"
+            role = u.group_role.primary_role[:17]
+            has_voice = "✅ Muestra lista" if user_mgr.has_clean_sample(u.user_id) else "⏳ Pendiente"
+            print(f"{u.user_id:<20} | {u.username:<15} | {disp:<18} | {role:<18} | {has_voice}")
+            if u.nicknames:
+                print(f"   └─ Apodos: {', '.join(u.nicknames)}")
+            if u.notes:
+                print(f"   └─ Notas:  {', '.join(u.notes)}")
+        print("=" * 95 + "\n")
+
+    elif args.user_action == "create":
+        nicks = [n.strip() for n in args.nicknames.split(",") if n.strip()] if args.nicknames else []
+        notes = [n.strip() for n in args.notes.split(",") if n.strip()] if args.notes else []
+        profile = user_mgr.create_user(
+            user_id=args.user_id,
+            username=args.username,
+            display_name=args.display_name,
+            nicknames=nicks,
+            notes=notes,
+            primary_role=args.role,
+            humor_type=args.humor,
+        )
+        print(f"\n✅ Usuario '{profile.username}' (@{profile.user_id}) registrado con éxito.")
+        if profile.display_name:
+            print(f"   • Nombre visible: {profile.display_name}")
+        if profile.nicknames:
+            print(f"   • Apodos: {', '.join(profile.nicknames)}")
+        if profile.notes:
+            print(f"   • Notas: {', '.join(profile.notes)}")
+        print(f"   • Perfil guardado en: storage/profiles/{profile.user_id}/profile.json\n")
+
+    elif args.user_action == "show":
+        user = user_mgr.get_user(args.user_id)
+        if not user:
+            print(f"\n❌ Usuario '{args.user_id}' no encontrado.")
+            return
+
+        print("\n" + "=" * 65)
+        print(f"👤 FICHA DE USUARIO: {user.display_name or user.username} (@{user.username})")
+        print("=" * 65)
+        print(f"ID Discord:          {user.user_id}")
+        print(f"Display Name:        {user.display_name or '-'}")
+        print(f"Apodos conocidos:    {', '.join(user.nicknames) if user.nicknames else 'Ninguno'}")
+        print(f"Sesiones analizadas: {user.total_sessions_analyzed}")
+        print(f"Tiempo hablado:      {user.total_speaking_seconds:.1f}s")
+        print(f"Rol en el grupo:     {user.group_role.primary_role} - {user.group_role.description}")
+        print(f"Estilo de humor:     {user.communication_style.humor_type}")
+        print(f"Muestra de voz:      {'✅ Curada y lista' if user_mgr.has_clean_sample(user.user_id) else '⏳ Sin muestra limpia aún'}")
+        if user.notes:
+            print(f"\nNotas contextuales:")
+            for note in user.notes:
+                print(f"   • {note}")
+        print(f"\nBig Five:")
+        print(f"   • Apertura:        {user.big_five.openness.score:.2f} (conf: {user.big_five.openness.confidence:.2f})")
+        print(f"   • Responsabilidad: {user.big_five.conscientiousness.score:.2f} (conf: {user.big_five.conscientiousness.confidence:.2f})")
+        print(f"   • Extraversión:    {user.big_five.extraversion.score:.2f} (conf: {user.big_five.extraversion.confidence:.2f})")
+        print(f"   • Amabilidad:      {user.big_five.agreeableness.score:.2f} (conf: {user.big_five.agreeableness.confidence:.2f})")
+        print(f"   • Neuroticismo:    {user.big_five.neuroticism.score:.2f} (conf: {user.big_five.neuroticism.confidence:.2f})")
+        print("=" * 65 + "\n")
+
+    elif args.user_action == "update":
+        nicks = [n.strip() for n in args.nicknames.split(",") if n.strip()] if args.nicknames else None
+        notes = [n.strip() for n in args.notes.split(",") if n.strip()] if args.notes else None
+        profile = user_mgr.update_user(
+            user_id=args.user_id,
+            display_name=args.display_name,
+            add_nicknames=nicks,
+            add_notes=notes,
+            primary_role=args.role,
+            humor_type=args.humor,
+        )
+        print(f"\n✅ Usuario '{profile.username}' (@{profile.user_id}) actualizado con éxito.")
+        if profile.display_name:
+            print(f"   • Nombre visible: {profile.display_name}")
+        if profile.nicknames:
+            print(f"   • Apodos: {', '.join(profile.nicknames)}")
+        if profile.notes:
+            print(f"   • Notas: {', '.join(profile.notes)}")
+        print()
+
+
+def handle_context_command(args, base_storage_dir: str):
+    """Maneja el subcomando context para reconstruir y mostrar hilos conversacionales."""
+    session_path = resolve_session_path(args.session, base_storage_dir)
+    transcript_file = os.path.join(session_path, "transcript.json")
+    if not os.path.exists(transcript_file):
+        raise FileNotFoundError(
+            f"transcript.json no existe en {session_path}. Procesa primero la sesión con: python main.py process --session {os.path.basename(session_path)}"
+        )
+
+    with open(transcript_file, "r", encoding="utf-8") as f:
+        transcript = SessionTranscript.model_validate_json(f.read())
+
+    user_mgr = UserManager(base_storage_dir)
+    threader = DiscourseThreader(user_manager=user_mgr, max_gap_seconds=args.max_gap)
+    threads = threader.reconstruct_threads(transcript)
+
+    print("\n" + "=" * 70)
+    print(f"🧵 RECONSTRUCCION DE CONTEXTO Y DISCURSO: {os.path.basename(session_path)}")
+    print(f"   Total de enunciados: {len(transcript.utterances)} | Hilos detectados: {len(threads)}")
+    print("=" * 70 + "\n")
+
+    for thread in threads:
+        print(thread.format_tree())
+        print()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Orquestador STT, Curador de Voz y Gemelo Digital")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -826,9 +963,51 @@ def main():
         help="Ruta base del directorio de almacenamiento",
     )
 
+    # Subcomando: user
+    user_parser = subparsers.add_parser("user", help="Gestión de usuarios y perfiles (crear, listar, editar apodos y notas)")
+    user_parser.add_argument("--storage-dir", type=str, default="", help="Ruta base del directorio de almacenamiento")
+    user_subparsers = user_parser.add_subparsers(dest="user_action", required=True)
+
+    # user list
+    user_list_parser = user_subparsers.add_parser("list", help="Lista todos los usuarios registrados y su estado")
+    user_list_parser.add_argument("--storage-dir", type=str, default="", help="Ruta base del directorio de almacenamiento")
+
+    # user create
+    user_create_parser = user_subparsers.add_parser("create", help="Registra un nuevo usuario para análisis y gemelo digital")
+    user_create_parser.add_argument("--user-id", type=str, required=True, help="ID único de usuario de Discord")
+    user_create_parser.add_argument("--username", type=str, required=True, help="Nombre de usuario de Discord")
+    user_create_parser.add_argument("--display-name", type=str, default=None, help="Apodo o nombre visible habitual")
+    user_create_parser.add_argument("--nicknames", type=str, default="", help="Apodos separados por coma (ej. 'cabeza,kev')")
+    user_create_parser.add_argument("--notes", type=str, default="", help="Notas personales separadas por coma (ej. 'juega jungla, hincha de Peñarol')")
+    user_create_parser.add_argument("--role", type=str, default=None, help="Rol arquetípico inicial en el grupo")
+    user_create_parser.add_argument("--humor", type=str, default=None, help="Estilo o tipo de humor")
+    user_create_parser.add_argument("--storage-dir", type=str, default="", help="Ruta base del directorio de almacenamiento")
+
+    # user show
+    user_show_parser = user_subparsers.add_parser("show", help="Muestra la ficha técnica detallada de un usuario")
+    user_show_parser.add_argument("--user-id", type=str, required=True, help="ID, username, display_name o apodo del usuario")
+    user_show_parser.add_argument("--storage-dir", type=str, default="", help="Ruta base del directorio de almacenamiento")
+
+    # user update
+    user_update_parser = user_subparsers.add_parser("update", help="Actualiza datos, apodos y notas de un usuario")
+    user_update_parser.add_argument("--user-id", type=str, required=True, help="ID, username, display_name o apodo del usuario")
+    user_update_parser.add_argument("--display-name", type=str, default=None, help="Nuevo nombre o apodo visible")
+    user_update_parser.add_argument("--nicknames", type=str, default=None, help="Nuevos apodos a agregar (separados por coma)")
+    user_update_parser.add_argument("--notes", type=str, default=None, help="Nuevas notas a agregar (separadas por coma)")
+    user_update_parser.add_argument("--role", type=str, default=None, help="Nuevo rol en el grupo")
+    user_update_parser.add_argument("--humor", type=str, default=None, help="Nuevo estilo de humor")
+    user_update_parser.add_argument("--storage-dir", type=str, default="", help="Ruta base del directorio de almacenamiento")
+
+    # Subcomando: context
+    context_parser = subparsers.add_parser("context", help="Reconstruye y visualiza hilos conversacionales y árboles de respuesta (0 tokens)")
+    context_parser.add_argument("--session", type=str, default="latest", help="ID de la sesión (ej. 2026-09-25_00-00-18) o 'latest'")
+    context_parser.add_argument("--tree", action="store_true", default=True, help="Muestra el árbol discursivo jerárquico de cada hilo")
+    context_parser.add_argument("--max-gap", type=float, default=10.0, help="Ventana máxima de tiempo en segundos para asociar respuestas")
+    context_parser.add_argument("--storage-dir", type=str, default="", help="Ruta base del directorio de almacenamiento")
+
     args = parser.parse_args()
 
-    base_storage = args.storage_dir
+    base_storage = getattr(args, "storage_dir", "")
     if not base_storage:
         base_storage = os.path.abspath(os.path.join(CURRENT_DIR, "..", "..", "storage"))
 
@@ -924,6 +1103,12 @@ def main():
             delete_audio=not args.keep_audio,
             model_size=args.model_size,
         )
+
+    elif args.command == "user":
+        handle_user_command(args, base_storage)
+
+    elif args.command == "context":
+        handle_context_command(args, base_storage)
 
 
 if __name__ == "__main__":

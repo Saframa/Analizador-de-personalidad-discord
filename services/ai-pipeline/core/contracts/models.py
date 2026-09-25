@@ -149,6 +149,9 @@ class UserProfile(BaseModel):
     group_role: GroupRole
     dialect_markers: DialectMarkers
     clean_voice_samples: List[str] = Field(default_factory=list)
+    display_name: Optional[str] = None
+    nicknames: List[str] = Field(default_factory=list)
+    notes: List[str] = Field(default_factory=list)
 
     def save_atomic(self, file_path: str) -> None:
         temp_path = f"{file_path}.tmp"

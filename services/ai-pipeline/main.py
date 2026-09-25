@@ -399,11 +399,14 @@ def profile_session(
 
     profiler = GeminiProfiler(model_name=model_name, mock=mock)
     synthesizer = ProfileSynthesizer(storage_dir=base_storage_dir)
-    updated_profiles: List[UserProfile] = []
+    target_id_resolved = None
+    if target_user_id:
+        resolved_u = user_mgr.get_user(target_user_id)
+        target_id_resolved = resolved_u.user_id if resolved_u else target_user_id
 
     for participant in metadata.participants:
         user_id = participant.user_id
-        if target_user_id and user_id != target_user_id:
+        if target_id_resolved and user_id != target_id_resolved:
             continue
 
         print(f"\n[ANALISIS] Evaluando a {participant.display_name} (@{participant.username})...")
@@ -522,10 +525,8 @@ def interactive_chat(
     selected_profile: Optional[UserProfile] = None
 
     if target_user_id:
-        for p in profiles:
-            if p.user_id == target_user_id or p.username.lower() == target_user_id.lower():
-                selected_profile = p
-                break
+        user_mgr = UserManager(base_storage_dir)
+        selected_profile = user_mgr.get_user(target_user_id)
         if not selected_profile:
             print(f"❌ No se encontró un perfil para el usuario '{target_user_id}'.")
             return
@@ -652,13 +653,21 @@ def synthesize_user_voice(
     """
     Sintetiza cualquier texto con la voz curada de un amigo utilizando F5-TTS en la GPU.
     """
+    user_mgr = UserManager(base_storage_dir)
+    user = user_mgr.get_user(user_id)
+    if not user:
+        print(f"❌ Error: No se encontró un usuario registrado para '{user_id}'.")
+        return ""
+
+    target_id = user.user_id
+    target_name = user.display_name or user.username
     print("\n" + "=" * 65)
-    print(f"🎙️ SINTETIZADOR DE VOZ CLONADA (ZERO-SHOT): Usuario @{user_id}")
+    print(f"🎙️ SINTETIZADOR DE VOZ CLONADA (ZERO-SHOT): {target_name} (@{user.username})")
     print("=" * 65)
     cloner = get_voice_cloner(mock=mock)
     try:
         out_wav = cloner.clone_for_user(
-            user_id=user_id,
+            user_id=target_id,
             target_text=text,
             base_storage_dir=base_storage_dir,
             output_path=output_path,

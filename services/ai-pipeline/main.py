@@ -34,6 +34,8 @@ from core.profiler.gemini_analyzer import GeminiProfiler
 from core.profiler.metrics import compute_user_metrics
 from core.profiler.profile_synthesizer import ProfileSynthesizer
 from core.stt.transcriber import WhisperTranscriber, release_gpu_memory
+from core.twin.chat_session import DigitalTwinChat
+from core.twin.compiler import compile_twin_prompt, extract_few_shot_dialogues
 from core.vad.overlap_detector import (
     extract_non_overlapping_intervals,
     find_overlapping_speakers,
@@ -360,8 +362,130 @@ def profile_session(
     return updated_profiles
 
 
+def interactive_chat(
+    base_storage_dir: str,
+    target_user_id: Optional[str] = None,
+    model_name: str = "gemini-flash-latest",
+    mock: bool = False,
+    single_turn_prompt: Optional[str] = None,
+) -> None:
+    """
+    Inicia una sesión interactiva de conversación en consola con el Gemelo Digital de un amigo.
+    """
+    profiles_dir = os.path.join(base_storage_dir, "profiles")
+    if not os.path.exists(profiles_dir):
+        print(f"❌ Error: No se encontró el directorio de perfiles en {profiles_dir}.")
+        print("   Ejecuta primero: python main.py process --session latest --profile")
+        return
+
+    profile_files = glob.glob(os.path.join(profiles_dir, "*", "profile.json"))
+    if not profile_files:
+        print("❌ Error: No hay perfiles guardados. Analiza primero una llamada de Discord.")
+        return
+
+    profiles: List[UserProfile] = []
+    for pf in profile_files:
+        try:
+            with open(pf, "r", encoding="utf-8") as f:
+                profiles.append(UserProfile.model_validate_json(f.read()))
+        except Exception:
+            pass
+
+    if not profiles:
+        print("❌ Error: No se pudieron cargar los perfiles existentes.")
+        return
+
+    selected_profile: Optional[UserProfile] = None
+
+    if target_user_id:
+        for p in profiles:
+            if p.user_id == target_user_id or p.username.lower() == target_user_id.lower():
+                selected_profile = p
+                break
+        if not selected_profile:
+            print(f"❌ No se encontró un perfil para el usuario '{target_user_id}'.")
+            return
+    elif len(profiles) == 1 or single_turn_prompt:
+        selected_profile = profiles[0]
+    else:
+        print("\n" + "=" * 65)
+        print("👥 SELECCIONA UN GEMELO DIGITAL PARA CONVERSAR:")
+        print("=" * 65)
+        for idx, p in enumerate(profiles, start=1):
+            print(f"[{idx}] {p.username} (ID: {p.user_id})")
+            print(f"    Rol: {p.group_role.primary_role} | {p.total_sessions_analyzed} llamadas ({p.total_speaking_seconds:.1f}s)")
+        print("-" * 65)
+        try:
+            choice_str = input("Elige un número: ").strip()
+            choice_idx = int(choice_str) - 1
+            if 0 <= choice_idx < len(profiles):
+                selected_profile = profiles[choice_idx]
+            else:
+                print("Opción inválida. Seleccionando el primero por defecto.")
+                selected_profile = profiles[0]
+        except Exception:
+            selected_profile = profiles[0]
+
+    # Extraer diálogos reales few-shot de las sesiones guardadas
+    few_shots = []
+    raw_sessions_dir = os.path.join(base_storage_dir, "raw_sessions")
+    if os.path.exists(raw_sessions_dir):
+        for t_file in glob.glob(os.path.join(raw_sessions_dir, "*", "transcript.json")):
+            try:
+                with open(t_file, "r", encoding="utf-8") as f:
+                    t_obj = SessionTranscript.model_validate_json(f.read())
+                    pairs = extract_few_shot_dialogues(t_obj, selected_profile.user_id, max_pairs=3)
+                    few_shots.extend(pairs)
+                    if len(few_shots) >= 5:
+                        break
+            except Exception:
+                pass
+
+    chat = DigitalTwinChat(
+        profile=selected_profile,
+        few_shot_dialogues=few_shots,
+        model_name=model_name,
+        mock=mock,
+    )
+
+    comm = selected_profile.communication_style
+    print("\n" + "=" * 65)
+    print(f"🤖 GEMELO DIGITAL: {selected_profile.username} (@{selected_profile.user_id})")
+    print("=" * 65)
+    print(f"🎭 Rol en el grupo:    {selected_profile.group_role.primary_role}")
+    print(f"💬 Estilo de humor:    {comm.humor_type}")
+    print(f"⏱️  Cadencia y turno:   {comm.cadence} (~{comm.avg_words_per_turn:.0f} palabras/turno)")
+    print(f"🇺🇾 Modismos preferidos: {', '.join(selected_profile.dialect_markers.favorite_slang) or 'bo, ta, flama'}")
+    print(f"🔥 Temperatura modelo: {chat.temperature} (calibrada por Big Five)")
+    print(f"🧠 Backend:            {chat.model_name} (mock={chat.mock})")
+    print("-" * 65)
+    print("Escribe tu mensaje y presiona Enter. (Escribe 'salir' para terminar).")
+    print("=" * 65 + "\n")
+
+    if single_turn_prompt:
+        print(f"Tú: {single_turn_prompt}")
+        reply = chat.send_message(single_turn_prompt)
+        print(f"{selected_profile.username}: {reply}\n")
+        return
+
+    while True:
+        try:
+            user_msg = input("Tú: ").strip()
+            if not user_msg:
+                continue
+            if user_msg.lower() in ["salir", "exit", "quit", "chau"]:
+                print(f"\n{selected_profile.username}: ¡Nos vemos, bo! Cuidate.\n")
+                break
+
+            reply = chat.send_message(user_msg)
+            print(f"\n{selected_profile.username}: {reply}\n")
+        except (KeyboardInterrupt, EOFError):
+            print(f"\n\n{selected_profile.username}: ¡Chau che, nos vemos!\n")
+            break
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Orquestador STT, Curador de Voz y Perfilador de Personalidad")
+    parser = argparse.ArgumentParser(description="Orquestador STT, Curador de Voz y Gemelo Digital")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Subcomando: process
@@ -438,15 +562,46 @@ def main():
         help="Ruta base del directorio de almacenamiento",
     )
 
+    # Subcomando: chat
+    chat_parser = subparsers.add_parser("chat", help="Inicia un chat interactivo con el Gemelo Digital de un amigo")
+    chat_parser.add_argument(
+        "--user-id",
+        type=str,
+        default=None,
+        help="ID o nombre de usuario de Discord a emular (ej. 438796478035787780 o saframa)",
+    )
+    chat_parser.add_argument(
+        "--model",
+        type=str,
+        default="gemini-flash-latest",
+        help="Modelo de Gemini para el chat (por defecto: gemini-flash-latest)",
+    )
+    chat_parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="Fuerza el modo mock local para pruebas sin conexión",
+    )
+    chat_parser.add_argument(
+        "--prompt",
+        type=str,
+        default=None,
+        help="Mensaje único para ejecución directa no interactiva",
+    )
+    chat_parser.add_argument(
+        "--storage-dir",
+        type=str,
+        default="",
+        help="Ruta base del directorio de almacenamiento",
+    )
+
     args = parser.parse_args()
 
     base_storage = args.storage_dir
     if not base_storage:
         base_storage = os.path.abspath(os.path.join(CURRENT_DIR, "..", "..", "storage"))
 
-    session_path = resolve_session_path(args.session, base_storage)
-
     if args.command == "process":
+        session_path = resolve_session_path(args.session, base_storage)
         process_session(
             session_dir=session_path,
             model_size=args.model_size,
@@ -463,6 +618,7 @@ def main():
             cleanup_session_audio(session_path)
 
     elif args.command == "profile":
+        session_path = resolve_session_path(args.session, base_storage)
         profile_session(
             session_dir=session_path,
             base_storage_dir=base_storage,
@@ -470,6 +626,15 @@ def main():
             mock=args.mock,
             target_user_id=args.user_id,
             cleanup_audio=not args.keep_audio,
+        )
+
+    elif args.command == "chat":
+        interactive_chat(
+            base_storage_dir=base_storage,
+            target_user_id=args.user_id,
+            model_name=args.model,
+            mock=args.mock,
+            single_turn_prompt=args.prompt,
         )
 
 

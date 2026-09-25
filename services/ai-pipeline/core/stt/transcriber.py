@@ -105,8 +105,8 @@ class WhisperTranscriber:
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Archivo de audio no existe: {audio_path}")
 
-        # Evitar archivos vacíos o con sólo cabecera WAV
-        if os.path.getsize(audio_path) <= 100:
+        # Evitar archivos vacíos o con sólo cabecera WAV/OGG (< 500 bytes)
+        if os.path.getsize(audio_path) < 500:
             return []
 
         model = self._get_model()

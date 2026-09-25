@@ -423,6 +423,7 @@ def profile_session(
         resolved_u = user_mgr.get_user(target_user_id)
         target_id_resolved = resolved_u.user_id if resolved_u else target_user_id
 
+    updated_profiles: List[UserProfile] = []
     for participant in metadata.participants:
         user_id = participant.user_id
         if target_id_resolved and user_id != target_id_resolved:

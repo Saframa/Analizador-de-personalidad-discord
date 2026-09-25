@@ -48,8 +48,8 @@ class SileroVADDetector:
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Archivo de audio no encontrado: {audio_path}")
 
-        # Si el archivo está vacío o es un encabezado WAV sin audio (<= 100 bytes)
-        if os.path.getsize(audio_path) <= 100:
+        # Si el archivo está vacío o es un encabezado WAV/OGG sin audio (< 500 bytes)
+        if os.path.getsize(audio_path) < 500:
             return []
 
         from silero_vad import read_audio, get_speech_timestamps
@@ -78,25 +78,29 @@ class SileroVADDetector:
             import av
             import numpy as np
 
-            container = av.open(audio_path)
-            resampler = av.AudioResampler(format="flt", layout="mono", rate=target_sample_rate)
-            chunks = []
-            stream = container.streams.audio[0]
-            for packet in container.demux(stream):
-                if packet.size == 0:
-                    continue
-                try:
-                    for f in packet.decode():
-                        for rf in resampler.resample(f):
-                            chunks.append(rf.to_ndarray())
-                except Exception:
-                    continue
-            container.close()
+            try:
+                container = av.open(audio_path)
+                resampler = av.AudioResampler(format="flt", layout="mono", rate=target_sample_rate)
+                chunks = []
+                if container.streams.audio:
+                    stream = container.streams.audio[0]
+                    for packet in container.demux(stream):
+                        if packet.size == 0:
+                            continue
+                        try:
+                            for f in packet.decode():
+                                for rf in resampler.resample(f):
+                                    chunks.append(rf.to_ndarray())
+                        except Exception:
+                            continue
+                container.close()
 
-            if chunks:
-                audio_np = np.concatenate(chunks, axis=1).squeeze(0)
-                wav = torch.from_numpy(audio_np)
-            else:
+                if chunks:
+                    audio_np = np.concatenate(chunks, axis=1).squeeze(0)
+                    wav = torch.from_numpy(audio_np)
+                else:
+                    return []
+            except Exception:
                 return []
 
         # Si no hay muestras suficientes (< 0.1 seg)

@@ -308,3 +308,78 @@ def test_profile_synthesis_multidimensional(tmp_path, sample_transcript):
     assert "el bot se fue de tema" in profile_s2.group_lore.inside_jokes
     assert "lag en discord" in profile_s2.emotional_triggers.tilts
 
+
+def test_extract_user_vocabulary():
+    from core.profiler.metrics import extract_user_vocabulary
+    utterances = [
+        Utterance(
+            id=1,
+            user_id="u1",
+            username="mateo",
+            start_time=0.0,
+            end_time=3.0,
+            duration=3.0,
+            text="Bo, mirá que el loco se fue al carajo, qué salado posta.",
+            confidence=0.99,
+        ),
+        Utterance(
+            id=2,
+            user_id="u1",
+            username="mateo",
+            start_time=4.0,
+            end_time=7.0,
+            duration=3.0,
+            text="Sí bo, salado mal, posta te digo.",
+            confidence=0.98,
+        ),
+    ]
+    vocab = extract_user_vocabulary(utterances)
+    assert isinstance(vocab, dict)
+    assert vocab["bo"] == 2
+    assert vocab["salado"] == 2
+    assert vocab["posta"] == 2
+    assert vocab["mirá"] == 1
+    # Universal grammatical stopwords must be filtered out
+    assert "el" not in vocab
+    assert "se" not in vocab
+    assert "al" not in vocab
+
+
+def test_profile_synthesizer_vocabulary_accumulation(tmp_path):
+    synthesizer = ProfileSynthesizer(storage_dir=str(tmp_path))
+    profiler = GeminiProfiler(mock=True)
+
+    t1 = SessionTranscript(
+        version="1.0.0",
+        session_id="2026-09-25_00-00-00",
+        processed_at=datetime.now(timezone.utc),
+        model="faster-whisper/medium",
+        utterances=[
+            Utterance(id=1, user_id="u1", username="test", start_time=0, end_time=2, duration=2, text="bo salado flama", confidence=0.9)
+        ]
+    )
+    m1 = compute_user_metrics(t1, "u1")
+    eval1 = profiler.analyze_user_session(t1, "u1", "test", m1)
+    p1 = synthesizer.synthesize_profile("u1", "test", "2026-09-25_00-00-00", m1, eval1)
+
+    assert p1.dialect_markers.vocabulary_frequencies.get("bo") == 1
+    assert p1.dialect_markers.vocabulary_frequencies.get("salado") == 1
+    assert p1.dialect_markers.vocabulary_frequencies.get("flama") == 1
+
+    t2 = SessionTranscript(
+        version="1.0.0",
+        session_id="2026-09-25_00-15-00",
+        processed_at=datetime.now(timezone.utc),
+        model="faster-whisper/medium",
+        utterances=[
+            Utterance(id=1, user_id="u1", username="test", start_time=0, end_time=2, duration=2, text="bo salado de nuevo bo", confidence=0.9)
+        ]
+    )
+    m2 = compute_user_metrics(t2, "u1")
+    eval2 = profiler.analyze_user_session(t2, "u1", "test", m2)
+    p2 = synthesizer.synthesize_profile("u1", "test", "2026-09-25_00-15-00", m2, eval2)
+
+    assert p2.dialect_markers.vocabulary_frequencies["bo"] == 3
+    assert p2.dialect_markers.vocabulary_frequencies["salado"] == 2
+    assert p2.dialect_markers.vocabulary_frequencies["flama"] == 1
+

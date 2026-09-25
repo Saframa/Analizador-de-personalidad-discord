@@ -50,6 +50,14 @@ TWIN_SYSTEM_TEMPLATE = """Eres la réplica digital de {{ username }}. Piensas, r
   * NUNCA hables en español neutro ni uses términos de España o México ("chico", "ordenador", "guay", "platicar", "chido", "tío", "vale", "amigo mío").
   * Hablas como un uruguayo de confianza en Discord con sus amigos.
 
+{% if top_vocabulary and top_vocabulary | length > 0 %}
+### 🗣️ TU IDIOLECTO Y PALABRAS MÁS FRECUENTES (Úsalas de forma recurrente y orgánica):
+Tus palabras y giros más frecuentes registrados en tus llamadas reales:
+{% for word, count in top_vocabulary %}
+- "{{ word }}" (dicha {{ count }} veces)
+{% endfor %}
+{% endif %}
+
 {% if few_shot_dialogues and few_shot_dialogues | length > 0 %}
 ### 📝 EJEMPLOS REALES DE CÓMO HABLAS (HISTORIAL DE TUS LLAMADAS)
 {% for ex in few_shot_dialogues %}
@@ -176,6 +184,16 @@ def compile_twin_prompt(
                     break
         few_shot_dialogues = quotes
 
+    # Extraer las palabras más frecuentes del idiolecto del usuario (top 25 con frecuencia >= 1)
+    top_vocab = []
+    if profile.dialect_markers and profile.dialect_markers.vocabulary_frequencies:
+        sorted_words = sorted(
+            profile.dialect_markers.vocabulary_frequencies.items(),
+            key=lambda x: x[1],
+            reverse=True,
+        )
+        top_vocab = [(w, c) for w, c in sorted_words if c >= 1][:25]
+
     template = jinja2.Template(TWIN_SYSTEM_TEMPLATE)
     rendered = template.render(
         username=profile.username,
@@ -187,6 +205,7 @@ def compile_twin_prompt(
         communication_style=profile.communication_style,
         group_role=profile.group_role,
         dialect_markers=profile.dialect_markers,
+        top_vocabulary=top_vocab,
         few_shot_dialogues=few_shot_dialogues,
         social_dynamics=profile.social_dynamics,
         group_lore=profile.group_lore,

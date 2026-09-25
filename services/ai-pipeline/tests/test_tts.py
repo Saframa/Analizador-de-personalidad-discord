@@ -34,6 +34,26 @@ def test_normalize_text_rioplatense():
     assert "🚀" not in normalized
 
 
+def test_normalize_text_voseo_and_prosody():
+    """Valida la acentuación de voseo, suavizado de risas y pausas prosódicas."""
+    raw = "che tenes que venir, para un poco que mira que esta salado y estas loco jajajajajaja dale bo"
+    normalized = normalize_text_for_tts(raw)
+
+    # Acentuación forzada de voseo y verbos rioplatenses
+    assert "tenés" in normalized
+    assert "pará un poco" in normalized
+    assert "mirá que" in normalized
+    assert "está salado" in normalized
+    assert "estás" in normalized
+
+    # Suavizado de risas continuas
+    assert "jajajajajaja" not in normalized
+    assert "jaja jaja" in normalized
+
+    # Pausa prosódica antes de bo terminal
+    assert "dale, bo." in normalized
+
+
 def test_chunk_text_by_sentences():
     """Verifica que el texto se divida adecuadamente para mantener la prosodia."""
     text = "Hola bo. ¿Cómo andás? Mirá que esto está flama! Todo bien por suerte."

@@ -310,10 +310,14 @@ class ProfileSynthesizer:
                 conflict_style=evaluation.conflict_style,
             )
 
+            session_vocab = getattr(session_metrics, "session_vocabulary", {}) or {}
+            sorted_vocab = dict(sorted(session_vocab.items(), key=lambda x: x[1], reverse=True)[:500])
+
             dialect_markers = DialectMarkers(
                 rioplatense_frequency=evaluation.rioplatense_frequency,
                 favorite_slang=list(dict.fromkeys(evaluation.favorite_slang)),
                 discourse_fillers=list(dict.fromkeys(evaluation.discourse_fillers)),
+                vocabulary_frequencies=sorted_vocab,
             )
 
             social_dyn = synthesize_social_dynamics(None, evaluation, social_temporal_metrics)
@@ -402,15 +406,23 @@ class ProfileSynthesizer:
                 conflict_style=evaluation.conflict_style,
             )
 
-            # 4. Dialecto ponderado y unión de jergas
+            # 4. Dialecto ponderado, unión de jergas y acumulación de idiolecto
             rioplatense_freq = running_avg(existing.dialect_markers.rioplatense_frequency, evaluation.rioplatense_frequency, n_prev)
             merged_slang = list(dict.fromkeys(existing.dialect_markers.favorite_slang + evaluation.favorite_slang))
             merged_fillers = list(dict.fromkeys(existing.dialect_markers.discourse_fillers + evaluation.discourse_fillers))
+
+            session_vocab = getattr(session_metrics, "session_vocabulary", {}) or {}
+            total_vocab = dict(existing.dialect_markers.vocabulary_frequencies or {})
+            for word, count in session_vocab.items():
+                total_vocab[word] = total_vocab.get(word, 0) + count
+
+            sorted_vocab = dict(sorted(total_vocab.items(), key=lambda x: x[1], reverse=True)[:500])
 
             dialect_markers = DialectMarkers(
                 rioplatense_frequency=rioplatense_freq,
                 favorite_slang=merged_slang,
                 discourse_fillers=merged_fillers,
+                vocabulary_frequencies=sorted_vocab,
             )
 
             # 5. Muestras combinadas

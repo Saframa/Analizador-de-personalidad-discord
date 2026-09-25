@@ -140,6 +140,14 @@
           "type": "array",
           "description": "Muletillas de inicio o cierre (ej. ['ta', 'bo', 'mirá', 'pará'])",
           "items": { "type": "string" }
+        },
+        "vocabulary_frequencies": {
+          "type": "object",
+          "description": "Diccionario acumulativo de palabras y frecuencias del usuario (Idiolecto ponderado)",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
         }
       }
     },

@@ -258,3 +258,22 @@ def test_compile_twin_prompt_multidimensional(mock_profile):
     assert "noctambulo" in prompt
     assert "tono relajado y chicanas absurdas" in prompt
 
+
+def test_compile_twin_prompt_with_idiolect_vocabulary(mock_profile):
+    profile = mock_profile.model_copy()
+    profile.dialect_markers.vocabulary_frequencies = {
+        "salado": 42,
+        "bo": 35,
+        "posta": 20,
+        "literal": 15,
+    }
+
+    prompt = compile_twin_prompt(profile)
+
+    assert "TU IDIOLECTO Y PALABRAS MÁS FRECUENTES" in prompt
+    assert '- "salado" (dicha 42 veces)' in prompt
+    assert '- "bo" (dicha 35 veces)' in prompt
+    assert '- "posta" (dicha 20 veces)' in prompt
+    assert '- "literal" (dicha 15 veces)' in prompt
+
+

@@ -43,27 +43,56 @@ def normalize_text_for_tts(text: str) -> str:
     for pattern, repl in replacements:
         text = re.sub(pattern, repl, text, flags=re.IGNORECASE)
 
-    # 3. Expansión de símbolos a palabras fonéticas
+    # 3. Acentuación forzada de formas verbales e imperativos de voseo rioplatense
+    # Asegura acento agudo en la última sílaba para que el vocoder no neutralice la prosodia
+    voseo_accentuations = [
+        (r"\btenes\b", "tenés"),
+        (r"\bqueres\b", "querés"),
+        (r"\bpodes\b", "podés"),
+        (r"\bsabes\b", "sabés"),
+        (r"\bhaces\b", "hacés"),
+        (r"\bdecis\b", "decís"),
+        (r"\bvenis\b", "venís"),
+        (r"\bestas\b", "estás"),
+        (r"\bveni\b", "vení"),
+        (r"\bhace\s+(eso|lo|una|un|algo|las|los|esto)\b", r"hacé \1"),
+        (r"\bdeja\s+(quieto|de|eso|lo|las|los|que)\b", r"dejá \1"),
+        (r"\bpara\s+(un\s+poco|bo|che|ahí|ahi|loco|fiera|la\s+mano)\b", r"pará \1"),
+        (r"\bmira\s+(que|bo|che|esto|eso|lo)\b", r"mirá \1"),
+        (r"\bconta\s+(eso|me|le)\b", r"contá \1"),
+        (r"\besta\s+(salado|flama|bueno|bien|mal|demas|demás|de menos|loco|complicado|pesado|muerto|roto|dando)\b", r"está \1"),
+    ]
+    for pattern, repl in voseo_accentuations:
+        text = re.sub(pattern, repl, text, flags=re.IGNORECASE)
+
+    # 4. Normalización prosódica de risas excesivas (evita distorsión y artefactos metálicos en vocoders)
+    text = re.sub(r"\b(ja){3,}\b", "jaja jaja", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(je){3,}\b", "jeje jeje", text, flags=re.IGNORECASE)
+
+    # 5. Pausas prosódicas antes de muletillas terminales rioplatenses (cesura previa requerida en habla oral)
+    text = re.sub(r"(\w)\s+(bo|ta)[\.!?]?$", r"\1, \2.", text, flags=re.IGNORECASE)
+
+    # 6. Expansión de símbolos a palabras fonéticas
     text = text.replace("%", " por ciento ")
     text = text.replace("&", " y ")
     text = text.replace("+", " más ")
     text = text.replace("/", " o ")
     text = text.replace("@", " arroba ")
 
-    # 4. Remover URLs o menciones tipo Discord
+    # 7. Remover URLs o menciones tipo Discord
     text = re.sub(r"<@!?[0-9]+>", "", text)  # menciones <@12345>
     text = re.sub(r"https?://\S+", "", text)  # links
 
-    # 5. Filtrar emojis y caracteres extraños, manteniendo puntuación y letras en español
+    # 8. Filtrar emojis y caracteres extraños, manteniendo puntuación y letras en español
     # Mantener: a-z, A-Z, 0-9, tildes (áéíóúÁÉÍÓÚñÑüÜ), signos de puntuación básicos
     text = re.sub(r"[^\w\s,.\?!¡¿:;\-—'\"]", " ", text)
 
-    # 6. Colapsar signos de puntuación repetidos (ej. '....' -> '.', '???' -> '?')
+    # 9. Colapsar signos de puntuación repetidos (ej. '....' -> '.', '???' -> '?')
     text = re.sub(r"\.{2,}", ".", text)
     text = re.sub(r"\?{2,}", "?", text)
     text = re.sub(r"!{2,}", "!", text)
 
-    # 7. Normalizar espacios múltiples
+    # 10. Normalizar espacios múltiples
     text = re.sub(r"\s+", " ", text).strip()
 
     return text

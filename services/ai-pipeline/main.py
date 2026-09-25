@@ -458,6 +458,10 @@ def profile_session(
             print(f"         - Disparadores:    Tilts: [{tilts_s}] | Hiperfocos: [{hyper_s}]")
         if profile.temporal_patterns.peak_hours:
             print(f"         - Cronotipo:       {profile.temporal_patterns.cronotype} ({', '.join(profile.temporal_patterns.peak_hours)})")
+        if profile.dialect_markers.vocabulary_frequencies:
+            top_w = list(profile.dialect_markers.vocabulary_frequencies.items())[:6]
+            w_str = ", ".join([f"{w} (x{c})" for w, c in top_w])
+            print(f"         - Idiolecto Top:   {w_str}")
         print(f"         - Big Five:")
         print(f"           • Apertura:        {bf.openness.score:.2f} (confianza: {bf.openness.confidence:.2f})")
         print(f"           • Responsabilidad: {bf.conscientiousness.score:.2f} (confianza: {bf.conscientiousness.confidence:.2f})")

@@ -4,10 +4,62 @@ Calcula métricas estadísticas directas desde los enunciados de la sesión:
 volumen de habla, palabras por turno, tasa de interrupción/solapamiento y cadencia.
 """
 
+from collections import Counter
+import re
 from typing import Any, Dict, List, Literal, Optional
 import numpy as np
 
 from core.contracts.models import SessionTranscript, Utterance
+
+# Stopwords gramaticales universales en español (conectores funcionales sin valor de idiolecto)
+SPANISH_GRAMMATICAL_STOPWORDS = {
+    "el", "la", "los", "las", "un", "una", "unos", "unas", "de", "del", "a", "al", "en",
+    "para", "por", "con", "sin", "sobre", "entre", "tras", "durante", "mediante", "hacia",
+    "desde", "hasta", "contra", "bajo", "que", "y", "e", "o", "u", "pero", "mas", "aunque",
+    "sino", "como", "si", "cuando", "donde", "porque", "pues", "es", "son", "era", "eran",
+    "fue", "fueron", "ser", "estar", "esta", "este", "estos", "estas", "ese", "esa", "esos",
+    "esas", "aquel", "aquella", "aquellos", "aquellas", "me", "te", "se", "nos", "os", "mi",
+    "tu", "su", "mis", "tus", "sus", "le", "les", "lo", "yo", "vosotros", "nosotros",
+    "muy", "tan", "ya", "hay", "habia", "había", "todo", "toda", "todos", "todas", "otro",
+    "otra", "otros", "otras", "cada", "algo", "nada", "asi", "así", "bien"
+}
+
+# Modismos, partículas orales y jerga rioplatense que NUNCA deben descartarse
+RIOPLATENSE_IDIOLECT_WHITELIST = {
+    "bo", "ta", "che", "pa", "fa", "ah", "eh", "re", "mal", "posta", "salado",
+    "flama", "capaz", "mirá", "mira", "viste", "tenés", "tenes", "sos", "dale",
+    "pará", "para", "vamo", "vamos", "loco", "fiera", "perro", "amigo", "onda",
+    "tipo", "literal", "claro", "manija", "pibe", "gurí", "guri", "vos", "de menos"
+}
+
+
+def extract_user_vocabulary(
+    utterances: List[Utterance],
+    min_word_len: int = 2,
+) -> Dict[str, int]:
+    """
+    Extrae el vocabulario característico del usuario a partir de sus intervenciones.
+    Filtra palabras funcionales vacías (stopwords), preservando modismos rioplatenses,
+    partículas orales y acentuación dialectal. Retorna un diccionario ordenado por frecuencia.
+    """
+    counter: Counter[str] = Counter()
+
+    for u in utterances:
+        raw_words = re.findall(r"\b[a-záéíóúñüA-ZÁÉÍÓÚÑÜ]{2,}\b", u.text.lower())
+        for word in raw_words:
+            if word in RIOPLATENSE_IDIOLECT_WHITELIST:
+                counter[word] += 1
+                continue
+
+            if word in SPANISH_GRAMMATICAL_STOPWORDS:
+                continue
+
+            if len(word) < min_word_len:
+                continue
+
+            counter[word] += 1
+
+    return dict(counter.most_common())
 
 
 class ConversationalMetrics:
@@ -21,6 +73,7 @@ class ConversationalMetrics:
         interruption_ratio: float,
         cadence: Literal["rapido", "pausado", "irregular", "moderado"],
         words_per_second: float,
+        session_vocabulary: Optional[Dict[str, int]] = None,
     ):
         self.user_id = user_id
         self.total_speaking_seconds = total_speaking_seconds
@@ -30,8 +83,9 @@ class ConversationalMetrics:
         self.interruption_ratio = interruption_ratio
         self.cadence = cadence
         self.words_per_second = words_per_second
+        self.session_vocabulary = session_vocabulary or {}
 
-    def to_dict(self) -> Dict[str, any]:
+    def to_dict(self) -> Dict[str, Any]:
         return {
             "user_id": self.user_id,
             "total_speaking_seconds": round(self.total_speaking_seconds, 2),
@@ -41,6 +95,7 @@ class ConversationalMetrics:
             "interruption_ratio": round(self.interruption_ratio, 3),
             "cadence": self.cadence,
             "words_per_second": round(self.words_per_second, 2),
+            "session_vocabulary": self.session_vocabulary,
         }
 
 
@@ -113,6 +168,8 @@ def compute_user_metrics(
         else:
             cadence = "moderado"
 
+    session_vocab = extract_user_vocabulary(user_utterances)
+
     return ConversationalMetrics(
         user_id=user_id,
         total_speaking_seconds=total_duration,
@@ -122,6 +179,7 @@ def compute_user_metrics(
         interruption_ratio=interruption_ratio,
         cadence=cadence,
         words_per_second=overall_wps,
+        session_vocabulary=session_vocab,
     )
 
 

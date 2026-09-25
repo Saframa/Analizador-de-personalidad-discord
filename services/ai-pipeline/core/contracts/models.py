@@ -135,6 +135,10 @@ class DialectMarkers(BaseModel):
     rioplatense_frequency: float = Field(..., ge=0.0, le=1.0)
     favorite_slang: List[str] = Field(default_factory=list)
     discourse_fillers: List[str] = Field(default_factory=list)
+    vocabulary_frequencies: Dict[str, int] = Field(
+        default_factory=dict,
+        description="Diccionario acumulativo de frecuencia de palabras (Idiolecto ponderado)",
+    )
 
 
 class InterlocutorAffinity(BaseModel):

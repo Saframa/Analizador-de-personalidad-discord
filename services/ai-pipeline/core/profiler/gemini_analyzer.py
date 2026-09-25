@@ -31,6 +31,10 @@ from core.profiler.metrics import ConversationalMetrics
 
 class GeminiSessionEvaluation(BaseModel):
     """Esquema de salida estructurada solicitado a Gemini."""
+    sociolinguistic_reasoning: str = Field(
+        default="Análisis sociolingüístico cualitativo previo de la dinámica conversacional.",
+        description="Razonamiento sociolingüístico y contextual previo (Chain-of-Thought) antes de asignar puntajes",
+    )
     openness_score: float = Field(..., ge=0.0, le=1.0, description="0.0 a 1.0")
     openness_confidence: float = Field(..., ge=0.0, le=1.0)
     openness_evidence: List[str] = Field(..., min_length=1, description="Citas textuales exactas")

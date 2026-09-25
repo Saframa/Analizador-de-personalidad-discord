@@ -11,8 +11,14 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Dict, List, Optional
 import requests
+from dotenv import load_dotenv
+
+# Cargar automáticamente .env si no fue cargado previamente
+load_dotenv()
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +123,46 @@ class LlamaClient:
             "(consíguela en 1 minuto en https://console.groq.com/keys)."
         )
 
+    def _resolve_groq_model(self, client, requested_model: Optional[str] = None) -> str:
+        """Determina de forma dinámica el mejor modelo disponible en Groq."""
+        if hasattr(self, "_cached_groq_model") and self._cached_groq_model:
+            return self._cached_groq_model
+
+        target = requested_model or self.custom_model or os.getenv("LLAMA_MODEL")
+        try:
+            available_models = [m.id for m in client.models.list().data]
+            if target and target in available_models:
+                self._cached_groq_model = target
+                return target
+
+            candidates = [
+                "llama-3.3-70b-versatile",
+                "llama-3.1-70b-versatile",
+                "llama-3.1-8b-instant",
+                "llama3-70b-8192",
+                "llama3-8b-8192",
+                "openai/gpt-oss-120b",
+                "qwen/qwen3.8-27b",
+                "openai/gpt-oss-20b",
+            ]
+            for cand in candidates:
+                if cand in available_models:
+                    logger.info(f"Modelo Groq seleccionado: {cand}")
+                    self._cached_groq_model = cand
+                    return cand
+
+            chat_models = [
+                m for m in available_models
+                if "whisper" not in m and "guard" not in m
+            ]
+            if chat_models:
+                self._cached_groq_model = chat_models[0]
+                return chat_models[0]
+        except Exception as e:
+            logger.warning(f"No se pudo consultar lista de modelos Groq: {e}")
+
+        return target or DEFAULT_GROQ_MODEL
+
     def _call_groq(
         self,
         messages: List[Dict[str, str]],
@@ -127,7 +173,7 @@ class LlamaClient:
         from groq import Groq
 
         client = self._groq_client or Groq(api_key=self.groq_key)
-        model_name = self.custom_model or os.getenv("LLAMA_MODEL") or DEFAULT_GROQ_MODEL
+        model_name = self._resolve_groq_model(client)
 
         completion = client.chat.completions.create(
             model=model_name,

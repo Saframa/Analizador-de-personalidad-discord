@@ -24,10 +24,13 @@ const client = new Client({
 const sessionManager = new SessionManager();
 const presenceWatcher = new PresenceWatcher(client, sessionManager);
 
-client.once(Events.ClientReady, (readyClient) => {
+client.once(Events.ClientReady, async (readyClient) => {
   console.log(`✅ Bot conectado exitosamente como: ${readyClient.user.tag}`);
   console.log(`👀 Vigilando canales de voz (Entrada: >= ${config.MIN_USERS_TO_RECORD} personas, Debounce: ${config.DEBOUNCE_LEAVE_SECONDS}s)`);
   console.log(`📁 Directorio de almacenamiento: ${config.STORAGE_DIR}`);
+
+  // Escanear si ya hay canales con gente hablando al momento de iniciar
+  await presenceWatcher.scanInitialChannels();
 });
 
 // Manejo de cierre elegante (Ctrl+C / SIGINT / SIGTERM)

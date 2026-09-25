@@ -79,6 +79,11 @@ export class SessionManager {
     // Inicializar el receptor de audio
     this.audioManager = new AudioReceiverManager(connection.receiver, audioDir);
 
+    // Pre-suscribir a todos los miembros presentes para no perder sílabas iniciales
+    for (const [userId] of this.participantsMap) {
+      this.audioManager.subscribeUser(userId);
+    }
+
     console.log(`🎙️ [SessionManager] Sesión iniciada: ${sessionId} en canal '${channel.name}' con ${this.participantsMap.size} participantes.`);
     return sessionId;
   }

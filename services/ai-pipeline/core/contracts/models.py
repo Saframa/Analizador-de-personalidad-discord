@@ -29,7 +29,7 @@ class AudioFileInfo(BaseModel):
     filename: str = Field(..., min_length=1, description="Ruta relativa del archivo de audio")
     sample_rate: Literal[48000] = Field(48000, description="Frecuencia de muestreo estándar de Discord")
     channels: Literal[1, 2] = Field(..., description="1 para Mono, 2 para Estéreo")
-    format: Literal["pcm_s16le", "wav"] = Field(..., description="Formato de codificación")
+    format: Literal["pcm_s16le", "wav", "ogg_opus"] = Field(..., description="Formato de codificación")
     size_bytes: int = Field(..., ge=0, description="Tamaño del archivo en bytes")
 
 

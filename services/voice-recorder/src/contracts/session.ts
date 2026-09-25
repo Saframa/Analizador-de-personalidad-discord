@@ -22,7 +22,7 @@ export const AudioFileInfoSchema = z.object({
   filename: z.string().min(1, 'El nombre de archivo es requerido'),
   sample_rate: z.literal(48000),
   channels: z.union([z.literal(1), z.literal(2)]),
-  format: z.enum(['pcm_s16le', 'wav']),
+  format: z.enum(['pcm_s16le', 'wav', 'ogg_opus']),
   size_bytes: z.number().int().nonnegative('El tamaño del archivo debe ser mayor o igual a 0'),
 });
 

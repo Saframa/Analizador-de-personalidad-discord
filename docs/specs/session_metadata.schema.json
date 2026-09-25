@@ -119,7 +119,7 @@
           },
           "format": {
             "type": "string",
-            "enum": ["pcm_s16le", "wav"],
+            "enum": ["pcm_s16le", "wav", "ogg_opus"],
             "description": "Formato de codificación de audio"
           },
           "size_bytes": {

@@ -37,12 +37,14 @@ class LlamaClient:
         provider: Optional[str] = None,
     ):
         # 1. Groq API Key (GROQ_API_KEY o LLAMA_API_KEY)
-        self.groq_key = (
-            api_key
-            or os.getenv("GROQ_API_KEY")
-            or os.getenv("LLAMA_API_KEY")
-            or ""
-        ).strip()
+        if api_key is not None:
+            self.groq_key = api_key.strip()
+        else:
+            self.groq_key = (
+                os.getenv("GROQ_API_KEY")
+                or os.getenv("LLAMA_API_KEY")
+                or ""
+            ).strip()
 
         # 2. OpenRouter API Key
         self.openrouter_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
@@ -64,7 +66,7 @@ class LlamaClient:
 
     def is_available(self) -> bool:
         """Determina si existe al menos un proveedor de LLaMA configurado y listo."""
-        if self._groq_client is not None or bool(self.groq_key):
+        if bool(self.groq_key):
             return True
         if bool(self.openrouter_key):
             return True

@@ -86,22 +86,35 @@ class BaseVoiceCloner(ABC):
         y sintetiza la respuesta del Gemelo Digital.
         """
         user_sample_dir = os.path.join(base_storage_dir, "clean_samples", user_id)
-        ref_wav = os.path.join(user_sample_dir, "sample_clean_60s.wav")
-
-        if not os.path.exists(ref_wav):
+        
+        # Priorizar muestra corta y alineada para máxima claridad fonética
+        prompt_wav = os.path.join(user_sample_dir, "sample_clean_prompt.wav")
+        standard_wav = os.path.join(user_sample_dir, "sample_clean_60s.wav")
+        if os.path.exists(prompt_wav):
+            ref_wav = prompt_wav
+        elif os.path.exists(standard_wav):
+            ref_wav = standard_wav
+        else:
             raise FileNotFoundError(
-                f"No se encontró la muestra de voz curada para el usuario {user_id} en {ref_wav}. "
+                f"No se encontró la muestra de voz curada para el usuario {user_id} en {user_sample_dir}. "
                 f"Ejecuta primero: python main.py process --session latest"
             )
 
         ref_txt = None
-        ref_txt_path = os.path.join(user_sample_dir, "sample_clean_60s.txt")
-        if os.path.exists(ref_txt_path):
+        prompt_txt = os.path.join(user_sample_dir, "sample_clean_prompt.txt")
+        standard_txt = os.path.join(user_sample_dir, "sample_clean_60s.txt")
+        if os.path.exists(prompt_txt):
             try:
-                with open(ref_txt_path, "r", encoding="utf-8") as f:
+                with open(prompt_txt, "r", encoding="utf-8") as f:
                     ref_txt = f.read().strip()
             except Exception as e:
-                logger.warning(f"No se pudo leer {ref_txt_path}: {e}")
+                logger.warning(f"No se pudo leer {prompt_txt}: {e}")
+        elif os.path.exists(standard_txt):
+            try:
+                with open(standard_txt, "r", encoding="utf-8") as f:
+                    ref_txt = f.read().strip()
+            except Exception as e:
+                logger.warning(f"No se pudo leer {standard_txt}: {e}")
 
         if not output_path:
             out_dir = os.path.join(base_storage_dir, "twin_outputs", user_id)
@@ -150,18 +163,20 @@ class MockVoiceCloner(BaseVoiceCloner):
 
 class F5TTSVoiceCloner(BaseVoiceCloner):
     """
-    Motor de Clonación Zero-Shot F5-TTS (Flow Matching Diffusion Transformer).
+    Motor de Clonación Zero-Shot F5-TTS adaptado y optimizado para Español (jpgallegoar/F5-Spanish).
     Acelerado con Tensor Cores en RTX 4070 (12GB VRAM).
     """
 
     def __init__(
         self,
-        model_name: str = "F5TTS_v1_Base",
+        model_name: str = "F5TTS_Base",
+        repo_id: str = "jpgallegoar/F5-Spanish",
         device: Optional[str] = None,
         sample_rate: int = 24000,
     ):
         setup_tts_gpu_environment()
         self.model_name = model_name
+        self.repo_id = repo_id
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.sample_rate = sample_rate
         self._model = None
@@ -169,9 +184,17 @@ class F5TTSVoiceCloner(BaseVoiceCloner):
     def _get_model(self):
         if self._model is None:
             from f5_tts.api import F5TTS
+            from huggingface_hub import hf_hub_download
 
-            logger.info(f"Cargando modelo F5-TTS en dispositivo '{self.device}'...")
-            self._model = F5TTS(model=self.model_name, device=self.device)
+            logger.info(f"Cargando modelo F5-TTS Spanish '{self.repo_id}' ({self.model_name}) en '{self.device}'...")
+            ckpt_path = hf_hub_download(repo_id=self.repo_id, filename="model_1200000.safetensors")
+            vocab_path = hf_hub_download(repo_id=self.repo_id, filename="vocab.txt")
+            self._model = F5TTS(
+                model=self.model_name,
+                ckpt_file=ckpt_path,
+                vocab_file=vocab_path,
+                device=self.device,
+            )
         return self._model
 
     def clone_speech(
@@ -200,6 +223,9 @@ class F5TTSVoiceCloner(BaseVoiceCloner):
                     ref_file=reference_audio_path,
                     ref_text=reference_text or "",
                     gen_text=chunk,
+                    cfg_strength=2.0,
+                    nfe_step=32,
+                    speed=1.0,
                 )
                 generated_chunks.append(wav)
                 sr = sample_rate

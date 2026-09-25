@@ -109,6 +109,8 @@ export class SessionManager {
         joined_at: new Date().toISOString(),
         left_at: null,
       });
+      // Pre-suscribir inmediatamente al audioManager para captura con cero latencia
+      this.audioManager?.subscribeUser(userId);
     }
   }
 

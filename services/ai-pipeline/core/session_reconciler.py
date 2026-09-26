@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 import wave
 import logging
 from datetime import datetime, timezone, timedelta
@@ -69,7 +70,34 @@ def is_audio_file_empty(file_path: str) -> bool:
     return os.path.getsize(file_path) <= 100
 
 
-def reconcile_orphan_sessions(storage_dir: str) -> Dict[str, Any]:
+def is_session_active(session_dir: str, active_window_seconds: int = 45) -> bool:
+    """
+    Comprueba si una sesión está siendo escrita activamente en vivo por el bot de Discord.
+    Si los archivos de audio o el directorio fueron modificados hace menos de active_window_seconds,
+    se considera en vivo y NUNCA debe reconciliarse prematuramente.
+    """
+    now = time.time()
+    try:
+        if (now - os.path.getmtime(session_dir)) < active_window_seconds:
+            return True
+        audio_dir = os.path.join(session_dir, "audio")
+        if os.path.exists(audio_dir):
+            if (now - os.path.getmtime(audio_dir)) < active_window_seconds:
+                return True
+            for f in os.listdir(audio_dir):
+                fp = os.path.join(audio_dir, f)
+                if os.path.isfile(fp) and (now - os.path.getmtime(fp)) < active_window_seconds:
+                    return True
+    except Exception:
+        pass
+    return False
+
+
+def reconcile_orphan_sessions(
+    storage_dir: str,
+    skip_active: bool = False,
+    active_window_seconds: int = 45,
+) -> Dict[str, Any]:
     """
     Escanea storage/raw_sessions y reconcilia sesiones huérfanas o interrumpidas:
     1. Si no tiene session_metadata.json y todos sus audios están vacíos (0 frames/<=107B):
@@ -95,6 +123,10 @@ def reconcile_orphan_sessions(storage_dir: str) -> Dict[str, Any]:
     for s_id in candidates:
         session_dir = os.path.join(raw_sessions_dir, s_id)
         if not os.path.isdir(session_dir) or s_id.startswith("."):
+            continue
+
+        # Si se solicita omitir sesiones activas y se detecta escritura en vivo, no tocarla
+        if skip_active and is_session_active(session_dir, active_window_seconds):
             continue
 
         meta_path = os.path.join(session_dir, "session_metadata.json")

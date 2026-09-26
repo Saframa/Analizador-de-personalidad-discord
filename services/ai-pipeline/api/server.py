@@ -10,6 +10,7 @@ import glob
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -35,6 +36,7 @@ from core.contracts.models import UserProfile
 from core.twin.chat_session import DigitalTwinChat
 from core.tts.cloner import F5TTSVoiceCloner
 from core.db import sync_all, ProfilerRepository
+from core.session_reconciler import is_session_active
 
 logger = logging.getLogger("api_server")
 
@@ -109,7 +111,7 @@ def get_daemons_status() -> Dict[str, Any]:
         try:
             cmd = " ".join(proc.info.get("cmdline") or []).lower()
             # Grabador de Discord (node index.js en voice-recorder)
-            if "voice-recorder" in cmd or "dist/src/index.js" in cmd:
+            if ("voice-recorder" in cmd or ("dist" in cmd and "index.js" in cmd)) and "server.py" not in cmd:
                 recorder_running = True
                 recorder_pid = proc.info["pid"]
             # Vigilante autónomo (main.py watch)
@@ -120,16 +122,18 @@ def get_daemons_status() -> Dict[str, Any]:
             pass
 
     # Chequear lock file si el proceso fue lanzado externamente
-    lock_file = os.path.join(STORAGE_DIR, "watch.pid")
-    if not watcher_running and os.path.exists(lock_file):
-        try:
-            with open(lock_file, "r") as f:
-                saved_pid = int(f.read().strip())
-                if psutil.pid_exists(saved_pid):
-                    watcher_running = True
-                    watcher_pid = saved_pid
-        except Exception:
-            pass
+    for lock_name in [".watcher.pid", "watch.pid"]:
+        lock_file = os.path.join(STORAGE_DIR, lock_name)
+        if not watcher_running and os.path.exists(lock_file):
+            try:
+                with open(lock_file, "r") as f:
+                    saved_pid = int(f.read().strip())
+                    if psutil.pid_exists(saved_pid):
+                        watcher_running = True
+                        watcher_pid = saved_pid
+                        break
+            except Exception:
+                pass
 
     # Contar sesiones pendientes
     raw_dir = os.path.join(STORAGE_DIR, "raw_sessions")
@@ -140,6 +144,8 @@ def get_daemons_status() -> Dict[str, Any]:
                 continue
             sp = os.path.join(raw_dir, s)
             if os.path.isdir(sp):
+                if is_session_active(sp):
+                    continue
                 tf = os.path.join(sp, "transcript.json")
                 ad = os.path.join(sp, "audio")
                 pf = os.path.join(ad, ".purged") if os.path.exists(ad) else None
@@ -210,21 +216,30 @@ def toggle_recorder():
     if status["active"]:
         try:
             p = psutil.Process(status["pid"])
+            for child in p.children(recursive=True):
+                try:
+                    child.terminate()
+                except Exception:
+                    pass
             p.terminate()
-            p.wait(timeout=3)
+            p.wait(timeout=5)
             return {"status": "stopped", "message": "Grabador de Discord pausado/detenido."}
         except Exception as e:
             return {"status": "error", "message": str(e)}
     else:
         # Iniciar grabador
         recorder_dir = os.path.abspath(os.path.join(ROOT_DIR, "services", "voice-recorder"))
+        entrypoint = os.path.join(recorder_dir, "dist", "src", "index.js")
+        if not os.path.exists(entrypoint):
+            raise HTTPException(status_code=500, detail="dist/src/index.js no existe. Compila con npm run build.")
         try:
-            subprocess.Popen(
-                ["npm", "run", "start"],
+            node_bin = shutil.which("node") or "node"
+            proc = subprocess.Popen(
+                [node_bin, os.path.join("dist", "src", "index.js")],
                 cwd=recorder_dir,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
             )
-            return {"status": "started", "message": "Grabador de Discord iniciado."}
+            return {"status": "started", "message": f"Grabador de Discord iniciado (PID {proc.pid})."}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
@@ -236,11 +251,20 @@ def toggle_watcher():
     if status["active"]:
         try:
             p = psutil.Process(status["pid"])
+            for child in p.children(recursive=True):
+                try:
+                    child.terminate()
+                except Exception:
+                    pass
             p.terminate()
             p.wait(timeout=3)
-            lock_file = os.path.join(STORAGE_DIR, "watch.pid")
-            if os.path.exists(lock_file):
-                os.remove(lock_file)
+            for lock_name in [".watcher.pid", "watch.pid"]:
+                lock_file = os.path.join(STORAGE_DIR, lock_name)
+                if os.path.exists(lock_file):
+                    try:
+                        os.remove(lock_file)
+                    except Exception:
+                        pass
             return {"status": "stopped", "message": "Vigilante de IA detenido."}
         except Exception as e:
             return {"status": "error", "message": str(e)}

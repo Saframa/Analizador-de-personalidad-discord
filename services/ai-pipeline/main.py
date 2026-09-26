@@ -56,7 +56,7 @@ from core.vad.overlap_detector import (
     find_overlapping_speakers,
 )
 from core.vad.silero import SileroVADDetector
-from core.session_reconciler import reconcile_orphan_sessions
+from core.session_reconciler import reconcile_orphan_sessions, is_session_active
 from core.db.sync import sync_all
 
 # Cargar variables de entorno (.env)
@@ -761,15 +761,18 @@ def watch_sessions(
                 # Comprobar si corresponde generar el backup diario de perfiles
                 create_daily_backup(base_storage_dir)
 
-                # Reconciliar sesiones huérfanas, interrumpidas o abortadas
+                # Reconciliar sesiones huérfanas, interrumpidas o abortadas (omitiendo grabaciones en vivo)
                 try:
-                    reconcile_orphan_sessions(base_storage_dir)
+                    reconcile_orphan_sessions(base_storage_dir, skip_active=True)
                 except Exception as rec_err:
                     log.warning(f"Aviso al reconciliar sesiones: {rec_err}")
 
                 candidates = sorted(glob.glob(os.path.join(raw_sessions_dir, "*")))
                 for session_dir in candidates:
                     if not os.path.isdir(session_dir):
+                        continue
+                    # Si la llamada se está grabando activamente en vivo, no procesar aún
+                    if is_session_active(session_dir):
                         continue
                     meta_file = os.path.join(session_dir, "session_metadata.json")
                     if not os.path.exists(meta_file):

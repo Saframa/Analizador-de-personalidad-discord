@@ -2,6 +2,15 @@
 Tests unitarios para la API local de FastAPI (servidor para Electron GUI).
 """
 
+import os
+import sys
+
+# Asegurar importación de api.server independientemente del directorio de ejecución
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PARENT_DIR = os.path.dirname(CURRENT_DIR)
+if PARENT_DIR not in sys.path:
+    sys.path.insert(0, PARENT_DIR)
+
 from fastapi.testclient import TestClient
 import pytest
 

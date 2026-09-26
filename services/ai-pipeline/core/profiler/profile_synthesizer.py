@@ -96,6 +96,26 @@ def merge_unique_strings(existing_list: List[str], new_list: List[str], max_item
     return result[:max_items]
 
 
+def filter_verified_slang(slang_list: List[str], vocab: Dict[str, int]) -> List[str]:
+    """Descarta modismos o muletillas que no tengan evidencia empírica en el vocabulario real del usuario."""
+    if not vocab:
+        return slang_list
+    verified = []
+    for item in slang_list:
+        clean = item.strip().lower()
+        if not clean:
+            continue
+        words = clean.split()
+        if len(words) == 1:
+            if vocab.get(words[0], 0) > 0:
+                verified.append(item)
+        else:
+            non_trivial = [w for w in words if w not in ("de", "ni", "al", "en", "lo", "el", "la", "a")]
+            if non_trivial and any(vocab.get(w, 0) > 0 for w in non_trivial):
+                verified.append(item)
+    return verified
+
+
 def synthesize_social_dynamics(
     prev_dynamics: Optional[SocialDynamics],
     evaluation: GeminiSessionEvaluation,
@@ -313,10 +333,13 @@ class ProfileSynthesizer:
             session_vocab = getattr(session_metrics, "session_vocabulary", {}) or {}
             sorted_vocab = dict(sorted(session_vocab.items(), key=lambda x: x[1], reverse=True)[:500])
 
+            verified_slang = filter_verified_slang(list(dict.fromkeys(evaluation.favorite_slang)), sorted_vocab)
+            verified_fillers = filter_verified_slang(list(dict.fromkeys(evaluation.discourse_fillers)), sorted_vocab)
+
             dialect_markers = DialectMarkers(
                 rioplatense_frequency=evaluation.rioplatense_frequency,
-                favorite_slang=list(dict.fromkeys(evaluation.favorite_slang)),
-                discourse_fillers=list(dict.fromkeys(evaluation.discourse_fillers)),
+                favorite_slang=verified_slang,
+                discourse_fillers=verified_fillers,
                 vocabulary_frequencies=sorted_vocab,
             )
 
@@ -418,10 +441,13 @@ class ProfileSynthesizer:
 
             sorted_vocab = dict(sorted(total_vocab.items(), key=lambda x: x[1], reverse=True)[:500])
 
+            verified_slang = filter_verified_slang(merged_slang, sorted_vocab)
+            verified_fillers = filter_verified_slang(merged_fillers, sorted_vocab)
+
             dialect_markers = DialectMarkers(
                 rioplatense_frequency=rioplatense_freq,
-                favorite_slang=merged_slang,
-                discourse_fillers=merged_fillers,
+                favorite_slang=verified_slang,
+                discourse_fillers=verified_fillers,
                 vocabulary_frequencies=sorted_vocab,
             )
 

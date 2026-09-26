@@ -645,7 +645,7 @@ def interactive_chat(
     print(f"🎭 Rol en el grupo:    {selected_profile.group_role.primary_role}")
     print(f"💬 Estilo de humor:    {comm.humor_type}")
     print(f"⏱️  Cadencia y turno:   {comm.cadence} (~{comm.avg_words_per_turn:.0f} palabras/turno)")
-    print(f"🇺🇾 Modismos preferidos: {', '.join(selected_profile.dialect_markers.favorite_slang) or 'bo, ta, flama'}")
+    print(f"🇺🇾 Modismos preferidos: {', '.join(selected_profile.dialect_markers.favorite_slang) or 'ninguno registrado'}")
     print(f"🔥 Temperatura modelo: {chat.temperature} (calibrada por Big Five)")
     print(f"🧠 Motor principal:     {chat.backend.upper()} ({chat.model_name})")
     print(f"🦙 Respaldo LLaMA:      {llama_status}")

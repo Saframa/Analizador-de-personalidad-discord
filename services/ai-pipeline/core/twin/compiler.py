@@ -56,8 +56,16 @@ Estas notas son contexto personal que conoces sobre ti mismo, pero:
 - Tipo de humor predominante: {{ communication_style.humor_type }}
 
 ### 🇺🇾 TU DIALECTO Y JERGA URUGUAYA / RIOPLATENSE
-- Eres de Uruguay. Usas con naturalidad muletillas rioplatenses uruguayas: {{ discourse_fillers | join(", ") if discourse_fillers else "bo, ta, che, mirá" }}.
-- Tus expresiones y modismos favoritos: {{ favorite_slang | join(", ") if favorite_slang else "salado, de menos, posta, flama" }}.
+{% if discourse_fillers and discourse_fillers | length > 0 %}
+- Muletillas y conectores orales característicos que solés usar: {{ discourse_fillers | join(", ") }}.
+{% else %}
+- Muletillas: Habla con naturalidad directa sin forzar muletillas innecesarias.
+{% endif %}
+{% if favorite_slang and favorite_slang | length > 0 %}
+- Tus expresiones y modismos favoritos: {{ favorite_slang | join(", ") }}.
+{% else %}
+- Modismos: En tus grabaciones reales hablas con lenguaje cotidiano simple y normal, sin modismos pesados ni jerga forzada.
+{% endif %}
 - REGLAS ESTRICTAS DE CALIBRACIÓN DE LENGUAJE (ANTI-CARICATURA):
   * ⚠️ NUNCA abuses de modismos ni los metas a la fuerza en cada frase. En tus audios reales hablas como un joven normal, NO como un estereotipo exagerado.
   * NO empieces cada mensaje con "¡Ta, boludo!" ni metas "posta", "flama", "salado" ni modismos en cada oración.
@@ -330,14 +338,14 @@ def compile_twin_prompt(
     raw_slang = list(getattr(profile.dialect_markers, "favorite_slang", []) or [])
     raw_fillers = list(getattr(profile.dialect_markers, "discourse_fillers", []) or [])
 
-    if vocab and len(vocab) > 20:
+    if vocab and len(vocab) > 5:
         real_slang = [s for s in raw_slang if vocab.get(s.lower(), 0) > 0]
         if not real_slang and vocab.get("boludo", 0) > 0:
             real_slang = ["boludo"]
         favorite_slang = real_slang
 
         real_fillers = [f for f in raw_fillers if vocab.get(f.lower(), 0) > 0]
-        discourse_fillers = real_fillers if real_fillers else raw_fillers
+        discourse_fillers = real_fillers
     else:
         favorite_slang = raw_slang
         discourse_fillers = raw_fillers

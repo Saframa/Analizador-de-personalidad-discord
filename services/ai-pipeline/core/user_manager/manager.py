@@ -130,9 +130,9 @@ class UserManager:
                 conflict_style="conciliador",
             ),
             dialect_markers=DialectMarkers(
-                rioplatense_frequency=0.5,
-                favorite_slang=["bo", "ta", "flama"],
-                discourse_fillers=["bo", "ta", "mirá"],
+                rioplatense_frequency=0.0,
+                favorite_slang=[],
+                discourse_fillers=[],
             ),
             clean_voice_samples=[],
             nicknames=clean_nicks,

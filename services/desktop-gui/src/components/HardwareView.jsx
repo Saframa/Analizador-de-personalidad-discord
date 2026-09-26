@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Cpu, 
   HardDrive, 
@@ -9,12 +9,16 @@ import {
   Flame, 
   RotateCw, 
   Zap,
-  Clock
+  Clock,
+  Check,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { toggleRecorder, toggleWatcher, triggerProcessAll } from '../api';
 
 export default function HardwareView({ status, onRefresh }) {
-  const [actionLoading, setActionLoading] = useState(false);
+  const [loadingAction, setLoadingAction] = useState(null); // 'both-start' | 'both-pause' | 'recorder' | 'watcher' | 'process-all' | 'refresh'
+  const [successAction, setSuccessAction] = useState(null);
   const [actionMessage, setActionMessage] = useState(null);
 
   const hw = status?.hardware || {};
@@ -36,63 +40,133 @@ export default function HardwareView({ status, onRefresh }) {
   const recorderActive = daemons.recorder?.active;
   const watcherActive = daemons.watcher?.active;
   const isBatchRunning = daemons.is_processing_batch;
+  const nextProc = daemons.next_processing;
 
-  const handleToggleRecorder = async () => {
+  // Contador regresivo suave que corre localmente cada segundo
+  const [localSeconds, setLocalSeconds] = useState(nextProc?.seconds_remaining ?? null);
+
+  useEffect(() => {
+    if (nextProc?.seconds_remaining !== undefined && nextProc?.seconds_remaining !== null) {
+      setLocalSeconds(nextProc.seconds_remaining);
+    }
+  }, [nextProc?.seconds_remaining]);
+
+  useEffect(() => {
+    if (!nextProc?.is_automatic || localSeconds === null || localSeconds === undefined) return;
+    const interval = setInterval(() => {
+      setLocalSeconds((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [nextProc?.is_automatic, localSeconds !== null]);
+
+  const formatCountdown = (totalSecs) => {
+    if (totalSecs === null || totalSecs === undefined) return '--:--';
+    if (totalSecs <= 0) return '00:00 (Rotando lote...)';
+    const m = Math.floor(totalSecs / 60).toString().padStart(2, '0');
+    const s = (totalSecs % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
+  const progressPercent = localSeconds !== null && localSeconds !== undefined
+    ? Math.min(100, Math.max(0, Math.round(((900 - localSeconds) / 900) * 100)))
+    : 0;
+
+  // Respuesta táctil auditiva sutil sintetizada mediante Web Audio API
+  const playTactileClick = () => {
     try {
-      setActionLoading(true);
-      const res = await toggleRecorder();
-      setActionMessage(res.message);
-      if (onRefresh) onRefresh();
-    } catch (err) {
-      setActionMessage(`Error: ${err.message}`);
-    } finally {
-      setActionLoading(false);
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(360, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.025);
+      gain.gain.setValueAtTime(0.04, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.025);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.03);
+    } catch {
+      // AudioContext bloqueado o no soportado, continuar en silencio
     }
   };
 
-  const handleToggleWatcher = async () => {
+  // Manejador centralizado con feedback visual y háptico garantizado
+  const handleAction = async (actionId, fn, fallbackSuccessText) => {
+    playTactileClick();
+    setLoadingAction(actionId);
+    setActionMessage(null);
     try {
-      setActionLoading(true);
-      const res = await toggleWatcher();
-      setActionMessage(res.message);
+      const res = await fn();
+      setSuccessAction(actionId);
+      setActionMessage({
+        type: 'success',
+        text: res?.message || fallbackSuccessText || 'Operación completada con éxito'
+      });
+      setTimeout(() => {
+        setSuccessAction((curr) => (curr === actionId ? null : curr));
+      }, 2000);
       if (onRefresh) onRefresh();
     } catch (err) {
-      setActionMessage(`Error: ${err.message}`);
+      setActionMessage({
+        type: 'error',
+        text: err?.message || 'Error al ejecutar la acción'
+      });
     } finally {
-      setActionLoading(false);
+      setLoadingAction(null);
     }
   };
 
-  const handleToggleBoth = async (activate) => {
-    try {
-      setActionLoading(true);
-      if (activate) {
-        if (!recorderActive) await toggleRecorder();
-        if (!watcherActive) await toggleWatcher();
-        setActionMessage('Ambos servicios activados');
-      } else {
-        if (recorderActive) await toggleRecorder();
-        if (watcherActive) await toggleWatcher();
-        setActionMessage('Ambos servicios pausados');
+  const handleToggleRecorder = () => {
+    handleAction(
+      'recorder', 
+      toggleRecorder, 
+      recorderActive ? 'Grabador pausado' : 'Grabador conectado a Discord'
+    );
+  };
+
+  const handleToggleWatcher = () => {
+    handleAction(
+      'watcher', 
+      toggleWatcher, 
+      watcherActive ? 'Vigilante IA pausado' : 'Vigilante IA iniciado'
+    );
+  };
+
+  const handleToggleBoth = (activate) => {
+    handleAction(
+      activate ? 'both-start' : 'both-pause',
+      async () => {
+        if (activate) {
+          if (!recorderActive) await toggleRecorder();
+          if (!watcherActive) await toggleWatcher();
+          return { message: 'Grabador y Vigilante IA activados correctamente' };
+        } else {
+          if (recorderActive) await toggleRecorder();
+          if (watcherActive) await toggleWatcher();
+          return { message: 'Grabador y Vigilante IA pausados' };
+        }
       }
-      if (onRefresh) onRefresh();
-    } catch (err) {
-      setActionMessage(`Error: ${err.message}`);
-    } finally {
-      setActionLoading(false);
-    }
+    );
   };
 
-  const handleProcessAll = async () => {
-    try {
-      setActionLoading(true);
-      const res = await triggerProcessAll();
-      setActionMessage(res.message);
-      if (onRefresh) onRefresh();
-    } catch (err) {
-      setActionMessage(`Error: ${err.message}`);
-    } finally {
-      setActionLoading(false);
+  const handleProcessAll = () => {
+    handleAction('process-all', triggerProcessAll, 'Procesamiento en lote iniciado en GPU');
+  };
+
+  const handleRefresh = () => {
+    playTactileClick();
+    setLoadingAction('refresh');
+    if (onRefresh) {
+      Promise.resolve(onRefresh()).finally(() => {
+        setSuccessAction('refresh');
+        setTimeout(() => {
+          setSuccessAction((curr) => (curr === 'refresh' ? null : curr));
+          setLoadingAction(null);
+        }, 500);
+      });
+    } else {
+      setLoadingAction(null);
     }
   };
 
@@ -109,25 +183,176 @@ export default function HardwareView({ status, onRefresh }) {
           </p>
         </div>
         <button
-          onClick={onRefresh}
-          className="p-2 rounded-xs bg-dark-850 hover:bg-dark-700 text-slate-400 hover:text-slate-200 border border-dark-700 transition-colors"
+          onClick={handleRefresh}
+          disabled={loadingAction === 'refresh'}
+          className="btn-secondary p-2 rounded-xs"
           title="Actualizar métricas"
         >
-          <RotateCw size={16} className={actionLoading ? "animate-spin" : ""} />
+          {successAction === 'refresh' ? (
+            <Check size={16} className="text-emerald-400" />
+          ) : (
+            <RotateCw size={16} className={loadingAction === 'refresh' ? "animate-spin text-indigo-400" : ""} />
+          )}
         </button>
       </div>
 
+      {/* Alerta de confirmación o error de acción */}
       {actionMessage && (
-        <div className="p-3 rounded-xs bg-dark-850 border border-dark-650 text-slate-300 text-xs flex items-center justify-between">
-          <span>{actionMessage}</span>
+        <div className={`p-3 rounded-xs border text-xs flex items-center justify-between animate-in fade-in slide-in-from-top-1 ${
+          actionMessage.type === 'error'
+            ? 'bg-rose-950/60 border-rose-800 text-rose-200'
+            : 'bg-emerald-950/50 border-emerald-800 text-emerald-200'
+        }`}>
+          <div className="flex items-center space-x-2">
+            {actionMessage.type === 'error' ? (
+              <AlertCircle size={15} className="text-rose-400 shrink-0" />
+            ) : (
+              <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
+            )}
+            <span>{actionMessage.text}</span>
+          </div>
           <button
             onClick={() => setActionMessage(null)}
-            className="text-slate-500 hover:text-slate-300 text-xs ml-4"
+            className="text-slate-400 hover:text-white text-xs ml-4 font-bold p-1"
           >
-            Cerrar
+            ✕
           </button>
         </div>
       )}
+
+      {/* Widget Destacado de Procesamiento Automático de Lotes (15m) */}
+      <div className="bg-dark-900 border border-dark-700 rounded-xs p-5 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-dark-700/60 pb-3">
+          <div className="flex items-center space-x-2.5">
+            <div className="p-2 rounded-xs bg-indigo-950/70 text-indigo-400 border border-indigo-800/50 shadow-xs">
+              <Clock size={18} className={nextProc?.is_automatic ? "animate-pulse" : ""} />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <h2 className="font-semibold text-slate-100 text-sm tracking-tight">
+                  Procesamiento Automático de Lotes
+                </h2>
+                <span className="text-[10px] px-1.5 py-0.5 rounded-xs bg-dark-800 text-slate-400 border border-dark-700 font-mono">
+                  15 min
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                Rotación continua sin cortar la llamada de Discord. GPU faster-whisper procesa al rotar cada bloque.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            {nextProc?.is_automatic ? (
+              <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-xs bg-emerald-950/70 border border-emerald-700/60 text-emerald-300 text-xs font-medium">
+                <span className="w-2 h-2 rounded-none bg-emerald-400 animate-ping"></span>
+                <span>Ciclo Automático Activo</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-xs bg-amber-950/60 border border-amber-800/60 text-amber-300 text-xs font-medium">
+                <AlertCircle size={12} />
+                <span>Ciclo Pausado</span>
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Cuerpo del widget: Countdown y Barra de Progreso */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+          {/* Columna Countdown Principal */}
+          <div className="md:col-span-2 p-4 rounded-xs bg-dark-850 border border-dark-700/80 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-400 flex items-center space-x-1.5">
+                <RotateCw size={13} className={nextProc?.is_automatic ? "animate-spin text-indigo-400" : "text-slate-500"} />
+                <span>Próxima Rotación y Procesado GPU:</span>
+              </span>
+              <span className="text-xs font-mono text-slate-400">
+                {progressPercent}% transcurrido
+              </span>
+            </div>
+
+            <div className="flex items-baseline space-x-3">
+              <div className="text-3xl font-extrabold font-mono tracking-tight text-indigo-200">
+                {formatCountdown(localSeconds)}
+              </div>
+              <span className="text-xs text-slate-400">
+                {nextProc?.is_automatic ? "para ejecutar transcripción y perfiles" : "(Inicie Grabador y Vigilante para activar)"}
+              </span>
+            </div>
+
+            {/* Barra de progreso visual con marcas de tiempo */}
+            <div className="space-y-1">
+              <div className="w-full bg-dark-800 rounded-none h-2 overflow-hidden border border-dark-700/50">
+                <div
+                  className="h-full bg-gradient-to-r from-indigo-500 via-cyan-500 to-emerald-400 transition-all duration-500"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                <span>00:00 (Inicio sesión)</span>
+                <span>07:30 (Mitad)</span>
+                <span>15:00 (Rotación de audio y GPU)</span>
+              </div>
+            </div>
+
+            {/* Sesión actual */}
+            {nextProc?.active_session_id && (
+              <div className="pt-1 flex items-center justify-between text-xs text-slate-400 border-t border-dark-750">
+                <span>Sesión activa en disco:</span>
+                <span className="font-mono text-indigo-300 font-semibold bg-dark-900 px-2 py-0.5 rounded-xs border border-dark-700">
+                  {nextProc.active_session_id}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Columna de Estado / Resumen */}
+          <div className="p-4 rounded-xs bg-dark-850 border border-dark-700/80 flex flex-col justify-between space-y-3">
+            <div className="space-y-2">
+              <span className="text-xs font-semibold text-slate-300">
+                ¿Cómo funciona el ciclo?
+              </span>
+              <ul className="text-[11px] text-slate-400 space-y-1.5 leading-relaxed">
+                <li className="flex items-start space-x-1.5">
+                  <span className="text-indigo-400 font-bold">•</span>
+                  <span><strong>15m continuos:</strong> Los audios PCM de cada usuario se graban en canales aislados.</span>
+                </li>
+                <li className="flex items-start space-x-1.5">
+                  <span className="text-cyan-400 font-bold">•</span>
+                  <span><strong>Cero cortes:</strong> La rotación abre un nuevo archivo sin desconectar a nadie de Discord.</span>
+                </li>
+                <li className="flex items-start space-x-1.5">
+                  <span className="text-emerald-400 font-bold">•</span>
+                  <span><strong>GPU RTX 4070:</strong> faster-whisper transcribe el lote cerrado a {">"}15x tiempo real.</span>
+                </li>
+              </ul>
+            </div>
+
+            {isBatchRunning ? (
+              <div className="p-2 rounded-xs bg-indigo-950/80 border border-indigo-700/70 text-indigo-300 text-xs flex items-center space-x-2">
+                <RotateCw size={13} className="animate-spin text-indigo-400 shrink-0" />
+                <span className="font-medium truncate">GPU transcribiendo lote anterior...</span>
+              </div>
+            ) : daemons.pending_sessions_count > 0 ? (
+              <div className="p-2 rounded-xs bg-amber-950/50 border border-amber-800/60 text-amber-300 text-xs flex items-center justify-between">
+                <span>{daemons.pending_sessions_count} sesiones pendientes</span>
+                <button
+                  onClick={handleProcessAll}
+                  disabled={loadingAction !== null}
+                  className="btn-primary text-[10px] px-2 py-0.5"
+                >
+                  Procesar
+                </button>
+              </div>
+            ) : (
+              <div className="p-2 rounded-xs bg-dark-800/70 border border-dark-700 text-slate-400 text-xs flex items-center space-x-1.5">
+                <Check size={12} className="text-emerald-400" />
+                <span>Todas las sesiones anteriores están procesadas</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
       {/* Grid de Métricas de Hardware */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -224,7 +449,7 @@ export default function HardwareView({ status, onRefresh }) {
 
       {/* Panel de Control de Daemons */}
       <div className="bg-dark-900 border border-dark-700 rounded-xs p-5 shadow-sm space-y-5">
-        <div className="flex items-center justify-between border-b border-dark-700/60 pb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-dark-700/60 pb-3">
           <div>
             <h2 className="font-semibold text-slate-200 text-sm">
               Control de Servicios en Segundo Plano
@@ -236,17 +461,47 @@ export default function HardwareView({ status, onRefresh }) {
           <div className="flex items-center space-x-2">
             <button
               onClick={() => handleToggleBoth(true)}
-              disabled={actionLoading}
-              className="px-3 py-1.5 rounded-xs bg-dark-800 hover:bg-dark-750 text-emerald-400 border border-dark-700 text-xs font-medium transition-colors"
+              disabled={loadingAction !== null}
+              className="btn-emerald px-3.5 py-1.5 rounded-xs text-xs font-semibold space-x-1.5"
             >
-              Activar Ambos
+              {loadingAction === 'both-start' ? (
+                <>
+                  <RotateCw size={13} className="animate-spin text-emerald-300" />
+                  <span>Activando Ambos...</span>
+                </>
+              ) : successAction === 'both-start' ? (
+                <>
+                  <Check size={13} className="text-emerald-300" />
+                  <span>¡Ambos Activados!</span>
+                </>
+              ) : (
+                <>
+                  <Play size={13} />
+                  <span>Activar Ambos</span>
+                </>
+              )}
             </button>
             <button
               onClick={() => handleToggleBoth(false)}
-              disabled={actionLoading}
-              className="px-3 py-1.5 rounded-xs bg-dark-800 hover:bg-dark-750 text-slate-400 hover:text-rose-400 border border-dark-700 text-xs font-medium transition-colors"
+              disabled={loadingAction !== null}
+              className="btn-rose px-3.5 py-1.5 rounded-xs text-xs font-semibold space-x-1.5"
             >
-              Pausar Ambos
+              {loadingAction === 'both-pause' ? (
+                <>
+                  <RotateCw size={13} className="animate-spin text-rose-300" />
+                  <span>Pausando Ambos...</span>
+                </>
+              ) : successAction === 'both-pause' ? (
+                <>
+                  <Check size={13} className="text-rose-300" />
+                  <span>¡Ambos Pausados!</span>
+                </>
+              ) : (
+                <>
+                  <Square size={13} />
+                  <span>Pausar Ambos</span>
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -292,17 +547,25 @@ export default function HardwareView({ status, onRefresh }) {
 
             <button
               onClick={handleToggleRecorder}
-              disabled={actionLoading}
-              className={`w-full py-2 px-3 rounded-xs text-xs font-medium transition-colors flex items-center justify-center space-x-2 border ${
-                recorderActive
-                  ? 'bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border-rose-800/60'
-                  : 'bg-dark-800 hover:bg-dark-750 text-emerald-400 border-emerald-800/50'
+              disabled={loadingAction !== null}
+              className={`w-full py-2.5 px-3 rounded-xs text-xs font-semibold space-x-2 ${
+                recorderActive ? 'btn-rose' : 'btn-emerald'
               }`}
             >
-              {recorderActive ? (
+              {loadingAction === 'recorder' ? (
+                <>
+                  <RotateCw size={14} className="animate-spin" />
+                  <span>{recorderActive ? 'Pausando Grabador...' : 'Iniciando Grabador...'}</span>
+                </>
+              ) : successAction === 'recorder' ? (
+                <>
+                  <Check size={14} className="text-emerald-300" />
+                  <span>{recorderActive ? '¡Grabador Detenido!' : '¡Grabador Conectado!'}</span>
+                </>
+              ) : recorderActive ? (
                 <>
                   <Square size={14} />
-                  <span>Pausar Escucha</span>
+                  <span>Pausar Escucha Discord</span>
                 </>
               ) : (
                 <>
@@ -355,14 +618,22 @@ export default function HardwareView({ status, onRefresh }) {
 
             <button
               onClick={handleToggleWatcher}
-              disabled={actionLoading}
-              className={`w-full py-2 px-3 rounded-xs text-xs font-medium transition-colors flex items-center justify-center space-x-2 border ${
-                watcherActive
-                  ? 'bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border-rose-800/60'
-                  : 'bg-dark-800 hover:bg-dark-750 text-cyan-400 border-cyan-800/50'
+              disabled={loadingAction !== null}
+              className={`w-full py-2.5 px-3 rounded-xs text-xs font-semibold space-x-2 ${
+                watcherActive ? 'btn-rose' : 'btn-cyan'
               }`}
             >
-              {watcherActive ? (
+              {loadingAction === 'watcher' ? (
+                <>
+                  <RotateCw size={14} className="animate-spin" />
+                  <span>{watcherActive ? 'Deteniendo Vigilante...' : 'Iniciando Vigilante...'}</span>
+                </>
+              ) : successAction === 'watcher' ? (
+                <>
+                  <Check size={14} className="text-emerald-300" />
+                  <span>{watcherActive ? '¡Vigilante Detenido!' : '¡Vigilante Activo!'}</span>
+                </>
+              ) : watcherActive ? (
                 <>
                   <Square size={14} />
                   <span>Frenar Procesado IA</span>
@@ -393,16 +664,26 @@ export default function HardwareView({ status, onRefresh }) {
 
           <button
             onClick={handleProcessAll}
-            disabled={actionLoading || isBatchRunning}
-            className={`px-4 py-2.5 rounded-xs text-xs font-semibold whitespace-nowrap transition-colors flex items-center justify-center space-x-2 border ${
+            disabled={loadingAction !== null || isBatchRunning}
+            className={`px-5 py-2.5 rounded-xs text-xs font-semibold whitespace-nowrap space-x-2 ${
               isBatchRunning
-                ? 'bg-indigo-950/70 border-indigo-700 text-indigo-300 cursor-not-allowed'
-                : 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-500 shadow-sm'
+                ? 'btn-secondary opacity-80 cursor-wait text-indigo-300 border-indigo-700/60'
+                : 'btn-primary'
             }`}
           >
-            {isBatchRunning ? (
+            {loadingAction === 'process-all' ? (
               <>
                 <RotateCw size={14} className="animate-spin" />
+                <span>Lanzando Pipeline...</span>
+              </>
+            ) : successAction === 'process-all' ? (
+              <>
+                <Check size={14} className="text-white" />
+                <span>¡Lote Lanzado con Éxito!</span>
+              </>
+            ) : isBatchRunning ? (
+              <>
+                <RotateCw size={14} className="animate-spin text-indigo-300" />
                 <span>Procesando en Segundo Plano...</span>
               </>
             ) : (

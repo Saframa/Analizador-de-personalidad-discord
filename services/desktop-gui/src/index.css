@@ -27,3 +27,44 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #334155;
 }
+
+/* Estilos de botones táctiles premium preservando bordes cuadrados */
+button {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@layer components {
+  .btn-tactile {
+    @apply relative inline-flex items-center justify-center font-medium transition-all duration-100 select-none cursor-pointer;
+  }
+  .btn-tactile:not(:disabled):hover {
+    @apply brightness-110 shadow-sm;
+  }
+  .btn-tactile:not(:disabled):active {
+    @apply scale-[0.98] translate-y-[1px] brightness-95 shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)];
+  }
+  .btn-tactile:disabled {
+    @apply opacity-50 cursor-not-allowed saturate-50;
+  }
+
+  .btn-primary {
+    @apply btn-tactile bg-gradient-to-b from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 text-white border border-indigo-400/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_1px_3px_rgba(0,0,0,0.4)] active:from-indigo-600 active:to-indigo-700;
+  }
+
+  .btn-secondary {
+    @apply btn-tactile bg-gradient-to-b from-dark-750 to-dark-800 hover:from-dark-700 hover:to-dark-750 text-slate-200 border border-dark-650 hover:border-dark-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_1px_2px_rgba(0,0,0,0.3)] active:from-dark-850 active:to-dark-800;
+  }
+
+  .btn-emerald {
+    @apply btn-tactile bg-gradient-to-b from-emerald-950/80 to-emerald-900/60 hover:from-emerald-900/90 hover:to-emerald-900/70 text-emerald-300 border border-emerald-700/60 hover:border-emerald-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_2px_rgba(0,0,0,0.3)] active:from-emerald-950 active:to-emerald-900;
+  }
+
+  .btn-rose {
+    @apply btn-tactile bg-gradient-to-b from-rose-950/80 to-rose-900/60 hover:from-rose-900/90 hover:to-rose-900/70 text-rose-300 border border-rose-700/60 hover:border-rose-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_2px_rgba(0,0,0,0.3)] active:from-rose-950 active:to-rose-900;
+  }
+
+  .btn-cyan {
+    @apply btn-tactile bg-gradient-to-b from-cyan-950/80 to-cyan-900/60 hover:from-cyan-900/90 hover:to-cyan-900/70 text-cyan-300 border border-cyan-700/60 hover:border-cyan-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_2px_rgba(0,0,0,0.3)] active:from-cyan-950 active:to-cyan-900;
+  }
+}

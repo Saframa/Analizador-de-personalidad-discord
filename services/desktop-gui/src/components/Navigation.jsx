@@ -7,7 +7,8 @@ import {
   Menu, 
   X, 
   Radio, 
-  HardDrive 
+  HardDrive,
+  Clock 
 } from 'lucide-react';
 
 export default function Navigation({ 
@@ -27,6 +28,31 @@ export default function Navigation({
   const recorderActive = status?.daemons?.recorder?.active;
   const watcherActive = status?.daemons?.watcher?.active;
   const isBatchRunning = status?.daemons?.is_processing_batch;
+  const nextProc = status?.daemons?.next_processing;
+
+  const [localSeconds, setLocalSeconds] = React.useState(nextProc?.seconds_remaining);
+
+  React.useEffect(() => {
+    if (nextProc?.seconds_remaining !== undefined && nextProc?.seconds_remaining !== null) {
+      setLocalSeconds(nextProc.seconds_remaining);
+    }
+  }, [nextProc?.seconds_remaining]);
+
+  React.useEffect(() => {
+    if (!nextProc?.is_automatic || localSeconds === null || localSeconds === undefined) return;
+    const interval = setInterval(() => {
+      setLocalSeconds((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [nextProc?.is_automatic, localSeconds !== null]);
+
+  const formatCountdown = (totalSecs) => {
+    if (totalSecs === null || totalSecs === undefined) return '--:--';
+    if (totalSecs <= 0) return 'Rotando...';
+    const m = Math.floor(totalSecs / 60).toString().padStart(2, '0');
+    const s = (totalSecs % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
 
   return (
     <>
@@ -35,7 +61,7 @@ export default function Navigation({
         <div className="flex items-center space-x-3">
           <button
             onClick={onToggleMenu}
-            className="p-2 rounded-xs bg-dark-800 hover:bg-dark-700 text-slate-300 hover:text-white border border-dark-700 transition-colors"
+            className="btn-tactile p-2 rounded-xs bg-dark-800 hover:bg-dark-750 text-slate-300 hover:text-white border border-dark-700 shadow-sm"
             title="Abrir menú"
           >
             {isMenuOpen ? <X size={20} /> : <Menu size={20} />}
@@ -52,6 +78,20 @@ export default function Navigation({
 
         {/* Indicadores rápidos de hardware y estado */}
         <div className="flex items-center space-x-2 text-xs">
+          {/* Próximo Procesamiento Automático Countdown */}
+          {nextProc?.is_automatic && (
+            <button
+              onClick={() => onSelectTab('hardware')}
+              className="btn-tactile hidden lg:flex items-center space-x-2 px-3 py-1 rounded-xs bg-gradient-to-r from-dark-850 to-indigo-950/40 border border-indigo-500/40 text-indigo-300 shadow-[0_0_12px_rgba(99,102,241,0.15)] hover:border-indigo-400/70"
+              title="Ver detalles de procesamiento automático en Hardware"
+            >
+              <Clock size={13} className="text-indigo-400 animate-pulse" />
+              <span className="text-slate-400 font-mono text-xs">
+                Próximo lote en: <strong className="text-indigo-200 font-bold ml-1">{formatCountdown(localSeconds)}</strong>
+              </span>
+            </button>
+          )}
+
           {/* Grabador Status */}
           <div className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-xs bg-dark-850 border border-dark-700">
             <Radio size={13} className={recorderActive ? "text-emerald-500 animate-pulse" : "text-slate-500"} />

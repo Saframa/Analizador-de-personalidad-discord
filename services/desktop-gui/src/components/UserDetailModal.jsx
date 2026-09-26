@@ -141,7 +141,7 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
             {/* Botón Chat con Gemelo Digital arriba a la derecha */}
             <button
               onClick={() => onOpenChat && onOpenChat(userId)}
-              className="px-3.5 py-1.5 rounded-xs bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center space-x-2 transition-colors shadow-sm"
+              className="btn-primary px-3.5 py-1.5 rounded-xs text-xs font-semibold flex items-center space-x-2 shadow-sm"
               title="Abrir chat con gemelo digital"
             >
               <MessageSquare size={15} />
@@ -151,7 +151,7 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
             {/* Cerrar modal */}
             <button
               onClick={onClose}
-              className="p-1.5 rounded-xs bg-dark-800 hover:bg-dark-700 text-slate-400 hover:text-white border border-dark-700 transition-colors"
+              className="btn-secondary p-1.5 rounded-xs text-slate-400 hover:text-white"
               title="Cerrar"
             >
               <X size={18} />
@@ -263,14 +263,14 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
                       <div className="flex space-x-2">
                         <button
                           onClick={handleSaveMeta}
-                          className="px-2.5 py-1 rounded-xs bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium flex items-center space-x-1"
+                          className="btn-primary px-3 py-1 text-xs font-medium flex items-center space-x-1"
                         >
                           <Save size={12} />
                           <span>Guardar</span>
                         </button>
                         <button
                           onClick={() => setIsEditingMeta(false)}
-                          className="px-2.5 py-1 rounded-xs bg-dark-750 text-slate-400 hover:text-slate-200 text-xs"
+                          className="btn-secondary px-3 py-1 text-xs"
                         >
                           Cancelar
                         </button>

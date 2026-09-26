@@ -74,10 +74,10 @@ export default function UsersView({ onSelectUser, onOpenChat }) {
 
           <button
             onClick={loadUsers}
-            className="p-2 rounded-xs bg-dark-850 hover:bg-dark-700 text-slate-400 hover:text-slate-200 border border-dark-700 transition-colors"
+            className="btn-secondary p-2 rounded-xs"
             title="Actualizar lista"
           >
-            <RotateCw size={15} className={loading ? "animate-spin" : ""} />
+            <RotateCw size={15} className={loading ? "animate-spin text-indigo-400" : ""} />
           </button>
         </div>
       </div>
@@ -96,7 +96,7 @@ export default function UsersView({ onSelectUser, onOpenChat }) {
           <p className="text-xs text-slate-500 mt-1">{error}</p>
           <button
             onClick={loadUsers}
-            className="mt-3 px-4 py-1.5 rounded-xs bg-dark-800 hover:bg-dark-700 text-slate-200 text-xs"
+            className="btn-secondary mt-3 px-4 py-1.5 text-xs"
           >
             Reintentar
           </button>
@@ -138,7 +138,7 @@ export default function UsersView({ onSelectUser, onOpenChat }) {
                 {/* Botón directo a Chat IA (arriba a la derecha) */}
                 <button
                   onClick={() => onOpenChat && onOpenChat(user.user_id)}
-                  className="p-2 rounded-xs bg-dark-800 hover:bg-indigo-600 text-slate-400 hover:text-white border border-dark-700 hover:border-indigo-500 transition-all shadow-xs"
+                  className="btn-tactile p-2 rounded-xs bg-dark-800 hover:bg-indigo-600 text-slate-400 hover:text-white border border-dark-700 hover:border-indigo-500 shadow-sm"
                   title={`Chatear con el gemelo de ${user.display_name}`}
                 >
                   <MessageSquare size={17} />
@@ -180,7 +180,7 @@ export default function UsersView({ onSelectUser, onOpenChat }) {
             <div className="mt-5 pt-3 border-t border-dark-800/70">
               <button
                 onClick={() => onSelectUser && onSelectUser(user.user_id)}
-                className="w-full py-2 px-3 rounded-xs bg-dark-850 hover:bg-dark-800 text-slate-300 hover:text-white border border-dark-700 hover:border-dark-600 text-xs font-medium transition-all flex items-center justify-center space-x-1.5"
+                className="btn-secondary w-full py-2 px-3 text-xs font-medium space-x-1.5"
               >
                 <span>Inspeccionar Perfil y Rasgos</span>
                 <ArrowRight size={14} />

@@ -152,6 +152,97 @@ def get_daemons_status() -> Dict[str, Any]:
                 if not os.path.exists(tf) or (ad and os.path.exists(ad) and not os.path.exists(pf)):
                     pending_count += 1
 
+    # Calcular próximo procesamiento automático (Rolling Sessions)
+    next_processing_info = {
+        "is_automatic": recorder_running and watcher_running,
+        "is_recording": recorder_running,
+        "is_watching": watcher_running,
+        "active_session_id": None,
+        "seconds_remaining": None,
+        "elapsed_seconds": None,
+        "total_interval_seconds": 900,
+        "status_text": "Servicios detenidos" if not recorder_running and not watcher_running else "En espera de llamada",
+    }
+
+    if os.path.exists(raw_dir):
+        candidates = sorted([
+            s for s in os.listdir(raw_dir)
+            if not s.startswith(".") and os.path.isdir(os.path.join(raw_dir, s))
+        ])
+        if candidates:
+            latest_sid = candidates[-1]
+            latest_path = os.path.join(raw_dir, latest_sid)
+            meta_path = os.path.join(latest_path, "session_metadata.json")
+            has_meta = os.path.exists(meta_path)
+            
+            is_active = is_session_active(latest_path) or (recorder_running and not has_meta)
+            if not is_active and has_meta:
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as f:
+                        m_data = json.load(f)
+                    if not m_data.get("ended_at"):
+                        is_active = True
+                except Exception:
+                    pass
+
+            if is_active and recorder_running:
+                active_session_id = latest_sid
+                try:
+                    start_dt = datetime.datetime.strptime(latest_sid, "%Y-%m-%d_%H-%M-%S")
+                    now_dt = datetime.datetime.now()
+                    elapsed = max(0.0, (now_dt - start_dt).total_seconds())
+                except Exception:
+                    elapsed = max(0.0, time.time() - os.path.getmtime(latest_path))
+
+                total_interval = 900  # 15 minutos
+                remaining = max(0, int(total_interval - elapsed))
+
+                if _background_job_status["is_running"]:
+                    status_text = "Procesando lote en segundo plano..."
+                elif not watcher_running:
+                    status_text = "Vigilante pausado (se procesará al activarlo)"
+                else:
+                    mins = remaining // 60
+                    secs = remaining % 60
+                    status_text = f"Próximo procesamiento en {mins:02d}:{secs:02d}"
+
+                next_processing_info = {
+                    "is_automatic": recorder_running and watcher_running,
+                    "is_recording": recorder_running,
+                    "is_watching": watcher_running,
+                    "active_session_id": active_session_id,
+                    "seconds_remaining": remaining,
+                    "elapsed_seconds": int(elapsed),
+                    "total_interval_seconds": total_interval,
+                    "status_text": status_text,
+                }
+            elif _background_job_status["is_running"]:
+                next_processing_info = {
+                    "is_automatic": False,
+                    "is_recording": recorder_running,
+                    "is_watching": watcher_running,
+                    "active_session_id": None,
+                    "seconds_remaining": 0,
+                    "elapsed_seconds": 0,
+                    "total_interval_seconds": 900,
+                    "status_text": "Procesando lote manual en GPU...",
+                }
+            elif pending_count > 0 and watcher_running:
+                next_processing_info = {
+                    "is_automatic": True,
+                    "is_recording": recorder_running,
+                    "is_watching": watcher_running,
+                    "active_session_id": None,
+                    "seconds_remaining": 5,
+                    "elapsed_seconds": 0,
+                    "total_interval_seconds": 900,
+                    "status_text": f"Procesando {pending_count} sesiones acumuladas...",
+                }
+            elif recorder_running and not watcher_running:
+                next_processing_info["status_text"] = "Grabando (Vigilante pausado)"
+            elif watcher_running and not recorder_running:
+                next_processing_info["status_text"] = "Vigilante activo (Grabador pausado)"
+
     return {
         "recorder": {
             "active": recorder_running,
@@ -163,6 +254,7 @@ def get_daemons_status() -> Dict[str, Any]:
         },
         "pending_sessions_count": pending_count,
         "is_processing_batch": _background_job_status["is_running"],
+        "next_processing": next_processing_info,
     }
 
 

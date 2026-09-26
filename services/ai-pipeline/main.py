@@ -56,6 +56,8 @@ from core.vad.overlap_detector import (
     find_overlapping_speakers,
 )
 from core.vad.silero import SileroVADDetector
+from core.session_reconciler import reconcile_orphan_sessions
+from core.db.sync import sync_all
 
 # Cargar variables de entorno (.env)
 from dotenv import load_dotenv
@@ -759,6 +761,12 @@ def watch_sessions(
                 # Comprobar si corresponde generar el backup diario de perfiles
                 create_daily_backup(base_storage_dir)
 
+                # Reconciliar sesiones huérfanas, interrumpidas o abortadas
+                try:
+                    reconcile_orphan_sessions(base_storage_dir)
+                except Exception as rec_err:
+                    log.warning(f"Aviso al reconciliar sesiones: {rec_err}")
+
                 candidates = sorted(glob.glob(os.path.join(raw_sessions_dir, "*")))
                 for session_dir in candidates:
                     if not os.path.isdir(session_dir):
@@ -804,6 +812,13 @@ def watch_sessions(
 
                             # Ejecutar backup de seguridad tras actualizar perfiles
                             create_daily_backup(base_storage_dir)
+
+                            # Sincronizar perfiles y sesiones actualizadas hacia SQLite
+                            try:
+                                sync_all(base_storage_dir)
+                            except Exception as sync_err:
+                                log.warning(f"Aviso al sincronizar SQLite: {sync_err}")
+
                             log.info(f"✅ [LLAMADA {session_id} COMPLETADA - AUDIO PURGADO]\n")
 
                         except Exception as proc_err:
@@ -1358,6 +1373,11 @@ def main():
         base_storage = os.path.abspath(os.path.join(CURRENT_DIR, "..", "..", "storage"))
 
     if args.command in ("process", "process-all"):
+        try:
+            reconcile_orphan_sessions(base_storage)
+        except Exception as e:
+            print(f"⚠️ Aviso al reconciliar sesiones huérfanas: {e}")
+
         if args.command == "process-all":
             args.session = "all"
             args.profile = not getattr(args, "no_profile", False)
@@ -1413,6 +1433,11 @@ def main():
                 )
             elif args.delete_audio:
                 cleanup_session_audio(session_path)
+
+        try:
+            sync_all(base_storage)
+        except Exception as e:
+            print(f"⚠️ Aviso al sincronizar base de datos SQLite: {e}")
 
     elif args.command == "profile":
         session_path = resolve_session_path(args.session, base_storage)

@@ -136,6 +136,8 @@ def get_daemons_status() -> Dict[str, Any]:
     pending_count = 0
     if os.path.exists(raw_dir):
         for s in os.listdir(raw_dir):
+            if s.startswith("."):
+                continue
             sp = os.path.join(raw_dir, s)
             if os.path.isdir(sp):
                 tf = os.path.join(sp, "transcript.json")
@@ -261,6 +263,10 @@ def _run_batch_process():
     try:
         cmd = [sys.executable, "main.py", "process-all"]
         proc = subprocess.run(cmd, cwd=BASE_DIR, capture_output=True, text=True)
+        try:
+            sync_all(STORAGE_DIR, DB_PATH)
+        except Exception:
+            pass
         _background_job_status["last_run"] = {
             "success": proc.returncode == 0,
             "stdout": proc.stdout[-500:] if proc.stdout else "",

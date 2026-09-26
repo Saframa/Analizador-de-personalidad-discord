@@ -10,6 +10,7 @@ import glob
 from typing import Dict, Any, Optional
 
 from core.db.database import get_connection, init_database, DEFAULT_DB_PATH
+from core.session_reconciler import reconcile_orphan_sessions
 
 logger = logging.getLogger("db_sync")
 
@@ -18,6 +19,13 @@ def sync_all(storage_dir: str, db_path: Optional[str] = None) -> Dict[str, Any]:
     """Sincroniza todos los perfiles y sesiones hacia SQLite."""
     target_db = db_path or DEFAULT_DB_PATH
     init_database(target_db)
+
+    # Reconciliar sesiones huérfanas o interrumpidas antes de sincronizar
+    try:
+        reconcile_orphan_sessions(storage_dir)
+    except Exception as e:
+        logger.warning(f"Advertencia al reconciliar sesiones huérfanas: {e}")
+
     conn = get_connection(target_db)
 
     profiles_synced = 0

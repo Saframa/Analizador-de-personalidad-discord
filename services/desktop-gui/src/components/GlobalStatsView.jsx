@@ -43,12 +43,12 @@ export default function GlobalStatsView({ onSelectUser }) {
 
   if (error && !stats) {
     return (
-      <div className="p-6 text-center text-rose-400 bg-dark-900 border border-dark-700 rounded-xl m-6">
+      <div className="p-6 text-center text-rose-400 bg-dark-900 border border-dark-700 rounded-xs m-6">
         <p className="font-medium">Error al cargar estadísticas</p>
         <p className="text-xs text-slate-500 mt-1">{error}</p>
         <button
           onClick={loadData}
-          className="mt-4 px-4 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 text-slate-200 text-xs transition-colors"
+          className="mt-4 px-4 py-1.5 rounded-xs bg-dark-800 hover:bg-dark-700 text-slate-200 text-xs transition-colors"
         >
           Reintentar
         </button>

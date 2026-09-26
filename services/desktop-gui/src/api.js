@@ -87,3 +87,34 @@ export async function synthesizeSpeech(userId, text) {
   const blob = await res.blob();
   return URL.createObjectURL(blob);
 }
+
+export async function fetchDiscordChannels() {
+  const res = await fetch(`${BASE_URL}/api/discord/channels`);
+  if (!res.ok) throw new Error('Error al obtener canales de Discord');
+  return res.json();
+}
+
+export async function joinDiscordChannel(channelId) {
+  const res = await fetch(`${BASE_URL}/api/discord/join`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ channel_id: channelId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Error al conectar al canal');
+  }
+  return res.json();
+}
+
+export async function leaveDiscordChannel() {
+  const res = await fetch(`${BASE_URL}/api/discord/leave`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Error al desconectar del canal');
+  }
+  return res.json();
+}
+

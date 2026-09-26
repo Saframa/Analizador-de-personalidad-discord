@@ -21,6 +21,7 @@ export default function Navigation({
   const tabs = [
     { id: 'stats', label: 'Estadísticas Globales', icon: BarChart3 },
     { id: 'users', label: 'Amigos y Perfiles', icon: Users },
+    { id: 'channels', label: 'Canales de Voz', icon: Radio },
     { id: 'hardware', label: 'Hardware y Vigilante', icon: Cpu },
     { id: 'tts', label: 'Estudio de Voz TTS', icon: Volume2 },
   ];
@@ -93,12 +94,16 @@ export default function Navigation({
           )}
 
           {/* Grabador Status */}
-          <div className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-xs bg-dark-850 border border-dark-700">
+          <button
+            onClick={() => onSelectTab('channels')}
+            className="btn-tactile hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-xs bg-dark-850 hover:bg-dark-800 border border-dark-700 cursor-pointer"
+            title="Ver canales de voz de Discord"
+          >
             <Radio size={13} className={recorderActive ? "text-emerald-500 animate-pulse" : "text-slate-500"} />
             <span className={recorderActive ? "text-emerald-400 font-medium" : "text-slate-400"}>
               {recorderActive ? "Grabando" : "Escucha Pausada"}
             </span>
-          </div>
+          </button>
 
           {/* Vigilante Status */}
           <div className="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-xs bg-dark-850 border border-dark-700">

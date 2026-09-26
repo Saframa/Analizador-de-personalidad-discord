@@ -1,9 +1,12 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import {
   Client,
   Events,
   VoiceState,
   ChannelType,
   VoiceBasedChannel,
+  PermissionFlagsBits,
 } from 'discord.js';
 import {
   joinVoiceChannel,
@@ -38,6 +41,16 @@ export class PresenceWatcher {
   private setupListeners(): void {
     this.client.on(Events.VoiceStateUpdate, (oldState: VoiceState, newState: VoiceState) => {
       this.handleVoiceStateUpdate(oldState, newState);
+      this.saveChannelsCache();
+    });
+    this.client.on(Events.ChannelUpdate, () => {
+      this.saveChannelsCache();
+    });
+    this.client.on(Events.ChannelCreate, () => {
+      this.saveChannelsCache();
+    });
+    this.client.on(Events.ChannelDelete, () => {
+      this.saveChannelsCache();
     });
   }
 
@@ -291,5 +304,202 @@ export class PresenceWatcher {
         }
       }
     }
+  }
+
+  /**
+   * Obtiene la información estructurada de todos los canales de voz en los servidores donde está el bot.
+   */
+  public getChannelsInfo(): {
+    botUser: { id: string; tag: string } | null;
+    connectedChannelId: string | null;
+    isRecording: boolean;
+    minUsersRequired: number;
+    guilds: Array<{
+      id: string;
+      name: string;
+      iconUrl: string | null;
+      channels: Array<{
+        id: string;
+        name: string;
+        category: string | null;
+        userLimit: number;
+        humanCount: number;
+        botCount: number;
+        isConnected: boolean;
+        canJoin: boolean;
+        meetsConditions: boolean;
+        members: Array<{
+          id: string;
+          username: string;
+          displayName: string;
+          isBot: boolean;
+          avatarUrl: string | null;
+          selfMute: boolean;
+          selfDeaf: boolean;
+        }>;
+      }>;
+    }>;
+  } {
+    const guildsData = [];
+
+    for (const guild of this.client.guilds.cache.values()) {
+      if (config.GUILD_ID && guild.id !== config.GUILD_ID) continue;
+
+      const channelsData = [];
+      const me = guild.members.me;
+
+      const voiceChannels = guild.channels.cache
+        .filter((c) => c.type === ChannelType.GuildVoice)
+        .sort((a, b) => a.position - b.position);
+
+      for (const channel of voiceChannels.values()) {
+        const vChannel = channel as VoiceBasedChannel;
+
+        let canJoin = true;
+        if (me) {
+          const perms = vChannel.permissionsFor(me);
+          if (perms && (!perms.has(PermissionFlagsBits.ViewChannel) || !perms.has(PermissionFlagsBits.Connect))) {
+            canJoin = false;
+          }
+        }
+        if (vChannel.userLimit > 0 && vChannel.members.size >= vChannel.userLimit && vChannel.id !== this.currentChannelId) {
+          canJoin = false;
+        }
+
+        const membersList = [];
+        let humanCount = 0;
+        let botCount = 0;
+
+        for (const m of vChannel.members.values()) {
+          if (m.user.bot) {
+            botCount++;
+          } else {
+            humanCount++;
+          }
+          membersList.push({
+            id: m.id,
+            username: m.user.username,
+            displayName: m.displayName,
+            isBot: m.user.bot,
+            avatarUrl: m.user.displayAvatarURL({ size: 64 }),
+            selfMute: m.voice.selfMute ?? false,
+            selfDeaf: m.voice.selfDeaf ?? false,
+          });
+        }
+
+        const isConnected = vChannel.id === this.currentChannelId && this.sessionManager.isRecording();
+        const meetsConditions = humanCount >= config.MIN_USERS_TO_RECORD;
+
+        channelsData.push({
+          id: vChannel.id,
+          name: vChannel.name,
+          category: vChannel.parent?.name ?? null,
+          userLimit: vChannel.userLimit,
+          humanCount,
+          botCount,
+          isConnected,
+          canJoin,
+          meetsConditions,
+          members: membersList,
+        });
+      }
+
+      guildsData.push({
+        id: guild.id,
+        name: guild.name,
+        iconUrl: guild.iconURL({ size: 128 }),
+        channels: channelsData,
+      });
+    }
+
+    return {
+      botUser: this.client.user ? { id: this.client.user.id, tag: this.client.user.tag } : null,
+      connectedChannelId: this.currentChannelId,
+      isRecording: this.sessionManager.isRecording(),
+      minUsersRequired: config.MIN_USERS_TO_RECORD,
+      guilds: guildsData,
+    };
+  }
+
+  /**
+   * Guarda una copia local en disco de los canales y su estado para lectura instantánea.
+   */
+  public saveChannelsCache(): void {
+    try {
+      const data = this.getChannelsInfo();
+      const filePath = path.join(config.STORAGE_DIR, '.discord_channels.json');
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    } catch {
+      // Ignorar fallas silenciosas de caché
+    }
+  }
+
+  /**
+   * Conecta manualmente el bot al canal indicado.
+   */
+  public async manualJoin(channelId: string): Promise<{ success: boolean; message: string }> {
+    if (this.isShuttingDown) {
+      return { success: false, message: 'El bot se encuentra en proceso de apagado.' };
+    }
+
+    let targetChannel: VoiceBasedChannel | null = null;
+    for (const guild of this.client.guilds.cache.values()) {
+      const ch = guild.channels.cache.get(channelId);
+      if (ch && ch.type === ChannelType.GuildVoice) {
+        targetChannel = ch as VoiceBasedChannel;
+        break;
+      }
+    }
+
+    if (!targetChannel) {
+      return { success: false, message: `Canal de voz '${channelId}' no encontrado en los servidores del bot.` };
+    }
+
+    // Verificar permisos
+    const me = targetChannel.guild.members.me;
+    if (me) {
+      const perms = targetChannel.permissionsFor(me);
+      if (perms && !perms.has(PermissionFlagsBits.Connect)) {
+        return { success: false, message: `El bot no tiene permisos para conectarse a '${targetChannel.name}'.` };
+      }
+    }
+
+    if (this.currentChannelId === channelId && this.sessionManager.isRecording()) {
+      return { success: true, message: `El bot ya se encuentra grabando en '${targetChannel.name}'.` };
+    }
+
+    // Si ya estamos en otro canal, desconectar limpiamente antes
+    if (this.sessionManager.isRecording() || this.currentConnection) {
+      console.log(`🔄 [PresenceWatcher] Desconectando canal anterior para unir manualmente a '${targetChannel.name}'...`);
+      await this.cleanupAndEndSession();
+      await new Promise((r) => setTimeout(r, 600));
+    }
+
+    this.cancelLeaveTimeout();
+    await this.joinAndStartRecording(targetChannel);
+    this.saveChannelsCache();
+
+    return {
+      success: true,
+      message: `Bot conectado exitosamente al canal de voz '${targetChannel.name}'. Grabación iniciada.`,
+    };
+  }
+
+  /**
+   * Desconecta manualmente el bot del canal de voz.
+   */
+  public async manualLeave(): Promise<{ success: boolean; message: string }> {
+    if (!this.sessionManager.isRecording() && !this.currentConnection) {
+      return { success: true, message: 'El bot no está en ninguna llamada.' };
+    }
+
+    console.log(`👋 [PresenceWatcher] Desconexión manual solicitada.`);
+    await this.cleanupAndEndSession();
+    this.saveChannelsCache();
+
+    return {
+      success: true,
+      message: 'Bot desconectado correctamente del canal de voz.',
+    };
   }
 }

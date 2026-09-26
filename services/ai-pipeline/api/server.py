@@ -21,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 import psutil
+import requests
 
 # Asegurar importación de módulos core
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -353,6 +354,89 @@ def toggle_recorder():
             return {"status": "started", "message": f"Grabador de Discord iniciado (PID {proc.pid})."}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+
+
+class DiscordJoinPayload(BaseModel):
+    channel_id: str
+
+
+@app.get("/api/discord/channels")
+def get_discord_channels():
+    """Consulta en tiempo real la lista de canales de voz desde el bot de Discord."""
+    rec_status = get_daemons_status()["recorder"]
+
+    # 1. Si el bot está activo, consultar IPC HTTP local (puerto 5055)
+    if rec_status["active"]:
+        try:
+            r = requests.get("http://127.0.0.1:5055/channels", timeout=1.5)
+            if r.status_code == 200:
+                data = r.json()
+                data["bot_active"] = True
+                return data
+        except Exception:
+            pass
+
+    # 2. Respaldo: leer caché local en disco (.discord_channels.json)
+    cache_path = os.path.join(STORAGE_DIR, ".discord_channels.json")
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                data["bot_active"] = rec_status["active"]
+                return data
+        except Exception:
+            pass
+
+    return {
+        "bot_active": rec_status["active"],
+        "connected_channel_id": None,
+        "is_recording": False,
+        "min_users_required": 2,
+        "guilds": [],
+        "message": "Inicia el grabador de Discord para consultar los canales de voz en vivo." if not rec_status["active"] else "Conectando con el bot de Discord..."
+    }
+
+
+@app.post("/api/discord/join")
+def join_discord_channel(payload: DiscordJoinPayload):
+    """Conecta manualmente el bot al canal de voz indicado."""
+    rec_status = get_daemons_status()["recorder"]
+    if not rec_status["active"]:
+        raise HTTPException(
+            status_code=400,
+            detail="El grabador de Discord está detenido. Inicia el grabador en Hardware antes de conectar el bot."
+        )
+
+    try:
+        r = requests.post(
+            "http://127.0.0.1:5055/join",
+            json={"channelId": payload.channel_id},
+            timeout=10.0
+        )
+        data = r.json()
+        if r.status_code != 200:
+            raise HTTPException(
+                status_code=r.status_code,
+                detail=data.get("message") or data.get("error") or "Error al conectar al canal"
+            )
+        return data
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"No se pudo comunicar con el bot de Discord: {e}")
+
+
+@app.post("/api/discord/leave")
+def leave_discord_channel():
+    """Desconecta manualmente el bot del canal de voz actual."""
+    rec_status = get_daemons_status()["recorder"]
+    if not rec_status["active"]:
+        return {"success": True, "message": "El grabador de Discord ya está detenido."}
+
+    try:
+        r = requests.post("http://127.0.0.1:5055/leave", timeout=5.0)
+        data = r.json()
+        return data
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"No se pudo comunicar con el bot de Discord: {e}")
 
 
 @app.post("/api/daemon/watcher/toggle")

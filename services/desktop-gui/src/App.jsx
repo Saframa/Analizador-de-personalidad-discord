@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Navigation from './components/Navigation';
 import GlobalStatsView from './components/GlobalStatsView';
 import UsersView from './components/UsersView';
+import VoiceChannelsView from './components/VoiceChannelsView';
 import HardwareView from './components/HardwareView';
 import TtsStudioView from './components/TtsStudioView';
 import UserDetailModal from './components/UserDetailModal';
@@ -76,6 +77,10 @@ export default function App() {
             onSelectUser={(userId) => setSelectedUserId(userId)}
             onOpenChat={(userId) => setChatUserId(userId)}
           />
+        )}
+
+        {currentTab === 'channels' && (
+          <VoiceChannelsView />
         )}
 
         {currentTab === 'hardware' && (

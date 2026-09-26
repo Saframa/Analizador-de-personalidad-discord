@@ -282,14 +282,12 @@ def test_profile_synthesis_multidimensional(tmp_path, sample_transcript):
 
     assert profile_s1.social_dynamics is not None
     assert "user_arbustin" in profile_s1.social_dynamics.affinities
-    assert len(profile_s1.group_lore.inside_jokes) >= 1
-    assert "dar flama" in profile_s1.group_lore.inside_jokes or len(profile_s1.group_lore.inside_jokes) > 0
     assert profile_s1.temporal_patterns.cronotype == "noctambulo"
     assert len(profile_s1.temporal_patterns.peak_hours) >= 1
 
     # Sesión 2: acumulación y enriquecimiento
     evaluation_s2 = evaluation.model_copy()
-    evaluation_s2.inside_jokes = ["dar flama", "el bot se fue de tema"]
+    evaluation_s2.inside_jokes = ["el bot se fue de tema"]
     evaluation_s2.tilts = ["lag en discord"]
 
     profile_s2 = synthesizer.synthesize_profile(

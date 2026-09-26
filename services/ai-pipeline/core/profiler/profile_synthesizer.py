@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import glob
 import os
+import re
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -99,20 +100,21 @@ def merge_unique_strings(existing_list: List[str], new_list: List[str], max_item
 def filter_verified_slang(slang_list: List[str], vocab: Dict[str, int]) -> List[str]:
     """Descarta modismos o muletillas que no tengan evidencia empírica en el vocabulario real del usuario."""
     if not vocab:
-        return slang_list
+        return []
     verified = []
     for item in slang_list:
         clean = item.strip().lower()
         if not clean:
             continue
-        words = clean.split()
-        if len(words) == 1:
-            if vocab.get(words[0], 0) > 0:
-                verified.append(item)
-        else:
-            non_trivial = [w for w in words if w not in ("de", "ni", "al", "en", "lo", "el", "la", "a")]
-            if non_trivial and any(vocab.get(w, 0) > 0 for w in non_trivial):
-                verified.append(item)
+        words = re.findall(r"\b[a-záéíóúñüA-ZÁÉÍÓÚÑÜ]+\b", clean)
+        if not words:
+            continue
+        content_words = [w for w in words if w not in ("de", "ni", "al", "en", "lo", "el", "la", "a", "por", "que", "un", "una", "del")]
+        if not content_words:
+            content_words = words
+        # Todas las palabras clave deben tener al menos 1 aparición en el vocabulario real
+        if all(vocab.get(w, 0) > 0 for w in content_words):
+            verified.append(item)
     return verified
 
 
@@ -172,8 +174,12 @@ def synthesize_group_lore(
     prev_entities = prev_lore.external_entities if prev_lore else []
     prev_anecdotes = prev_lore.notable_anecdotes if prev_lore else []
 
+    # Filtrar chistes genéricos que hayan quedado residualmente como 'dar flama'
+    clean_prev_jokes = [j for j in prev_jokes if "dar flama" not in j.lower()]
+    clean_eval_jokes = [j for j in evaluation.inside_jokes if "dar flama" not in j.lower()]
+
     return GroupLore(
-        inside_jokes=merge_unique_strings(prev_jokes, evaluation.inside_jokes, max_items=15),
+        inside_jokes=merge_unique_strings(clean_prev_jokes, clean_eval_jokes, max_items=15),
         external_entities=merge_unique_strings(prev_entities, evaluation.external_entities, max_items=15),
         notable_anecdotes=merge_unique_strings(prev_anecdotes, evaluation.notable_anecdotes, max_items=10),
     )

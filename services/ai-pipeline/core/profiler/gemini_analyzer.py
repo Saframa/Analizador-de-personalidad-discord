@@ -67,11 +67,11 @@ class GeminiSessionEvaluation(BaseModel):
     rioplatense_frequency: float = Field(..., ge=0.0, le=1.0, description="Densidad de modismos de 0.0 a 1.0")
     favorite_slang: List[str] = Field(
         default_factory=list,
-        description="Modismos rioplatenses que el usuario DIJO TEXTUALMENTE en sus turnos (ej. 'salado', 'posta', 'de menos'). Dejar vacía [] si no usó modismos. NUNCA inventar palabras ausentes en la transcripción."
+        description="Modismos o jerga que el usuario DIJO TEXTUALMENTE en sus turnos en este diálogo. Dejar lista vacía [] si el usuario no usó modismos. NUNCA inventar palabras ni atribuir jergas que no estén en la transcripción."
     )
     discourse_fillers: List[str] = Field(
         default_factory=list,
-        description="Muletillas o conectores orales que el usuario USÓ REALMENTE (ej. 'bo', 'ta', 'che', 'tipo', 'mirá'). Dejar vacía [] si no usó muletillas."
+        description="Muletillas o conectores orales que el usuario USÓ REALMENTE en sus turnos. Dejar lista vacía [] si no usó muletillas. NUNCA inventar muletillas."
     )
     recurring_topics: List[str] = Field(default_factory=list)
 
@@ -216,7 +216,7 @@ TRANSCRIPCIÓN Y CONTEXTO DISCURSIVO DE LA SESIÓN:
 {dialogue}
 
 REGLAS CRÍTICAS:
-1. Recuerda la calibración rioplatense (chicanas, 'bo', 'ta', 'salado').
+1. Recuerda la calibración rioplatense (chicanas afectuosas, ironía cómplice, horizontalidad grupal).
 2. Evalúa cómo interactúa y responde a otros interlocutores según el flujo conversacional.
 3. CADA rasgo del Big Five debe incluir citas textuales directas de las intervenciones de {target_username}.
 4. Si el usuario habló poco o no hay suficiente evidencia para un rasgo, pon confianza < 0.5 y score 0.5.
@@ -315,7 +315,7 @@ TRANSCRIPCIÓN Y CONTEXTO DISCURSIVO DE LA SESIÓN:
 {dialogue}
 
 REGLAS CRÍTICAS:
-1. Recuerda la calibración rioplatense (chicanas afectuosas, 'bo', 'ta', 'salado', ironía cómplice).
+1. Recuerda la calibración rioplatense (chicanas afectuosas, ironía cómplice, horizontalidad grupal).
 2. CADA rasgo del Big Five debe incluir citas textuales directas tomadas de las intervenciones de {target_username}.
 3. Dinámica social: identifica a quién dirige chicanas (teasing_targets) y con quién muestra mayor afinidad (closest_friends).
 4. Si el usuario habló poco, asigna score 0.5 y confianza < 0.5.
@@ -424,16 +424,8 @@ REGLAS CRÍTICAS:
         # Identificar amigos e interlocutores en la llamada
         other_users = list({u.username for u in transcript.utterances if u.user_id != target_user_id})
         teasing_targets = [u for u in other_users if any(u.lower() in q.lower() for q in quotes)]
-        if not teasing_targets and other_users:
-            teasing_targets = [other_users[0]]
-
         inside_jokes = []
-        if re.search(r'(?<!\w)flama(?!\w)', full_text_lower):
-            inside_jokes.append("dar flama")
-        if re.search(r'(?<!\w)clon', full_text_lower):
-            inside_jokes.append("clonar la voz a los pibes")
-
-        external_entities = ["Discord", "Kevin"] if "kevin" in full_text_lower else ["Discord"]
+        external_entities = ["Discord"]
         tilts = ["fallas de audio o lag", "cuando algo no funciona a la primera"] if ("rompió" in full_text_lower or "carajo" in full_text_lower) else []
         hyperfocus = ["inteligencia artificial y clonación", "proyectos de software"] if ("voz" in full_text_lower or "clon" in full_text_lower or "web" in full_text_lower) else ["tecnología"]
         initiative_level = "iniciador" if metrics.turn_count >= 6 else "seguidor"

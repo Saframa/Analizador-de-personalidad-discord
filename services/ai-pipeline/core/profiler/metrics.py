@@ -27,7 +27,7 @@ SPANISH_GRAMMATICAL_STOPWORDS = {
 # Modismos, partículas orales y jerga rioplatense que NUNCA deben descartarse
 RIOPLATENSE_IDIOLECT_WHITELIST = {
     "bo", "ta", "che", "pa", "fa", "ah", "eh", "re", "mal", "posta", "salado",
-    "flama", "capaz", "mirá", "mira", "viste", "tenés", "tenes", "sos", "dale",
+    "capaz", "mirá", "mira", "viste", "tenés", "tenes", "sos", "dale",
     "pará", "para", "vamo", "vamos", "loco", "fiera", "perro", "amigo", "onda",
     "tipo", "literal", "claro", "manija", "pibe", "gurí", "guri", "vos", "de menos"
 }

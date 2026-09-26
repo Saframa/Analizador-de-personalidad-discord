@@ -14,5 +14,17 @@ if (-not (Test-Path "node_modules")) {
     npm install
 }
 
+# Liberar puerto 8000 por si quedo algun proceso huerfano anterior
+$conn = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue
+if ($conn) {
+    $pids = $conn | Select-Object -ExpandProperty OwningProcess -Unique
+    foreach ($p in $pids) {
+        if ($p -gt 0) {
+            Write-Host "[INFO] Liberando puerto 8000 (PID $p)..." -ForegroundColor Yellow
+            Stop-Process -Id $p -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 Write-Host "[INFO] Iniciando backend IA y Frontend Electron..." -ForegroundColor Green
 npm run dev

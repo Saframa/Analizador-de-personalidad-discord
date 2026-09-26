@@ -17,7 +17,7 @@ if not exist "node_modules" (
     )
 )
 
-echo [INFO] Iniciando backend IA y Frontend Electron...
+echo [INFO] Iniciando aplicacion de escritorio (Electron + React + FastAPI)...
 call npm run dev
 
 if errorlevel 1 (

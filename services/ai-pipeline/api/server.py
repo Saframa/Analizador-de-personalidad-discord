@@ -34,8 +34,12 @@ if BASE_DIR not in sys.path:
 from core.contracts.models import UserProfile
 from core.twin.chat_session import DigitalTwinChat
 from core.tts.cloner import F5TTSVoiceCloner
+from core.db import sync_all, ProfilerRepository
 
 logger = logging.getLogger("api_server")
+
+DB_PATH = os.path.join(STORAGE_DIR, "profiler.db")
+repo = ProfilerRepository(DB_PATH)
 
 # Instancias compartidas en memoria
 _chat_sessions: Dict[str, DigitalTwinChat] = {}
@@ -157,6 +161,12 @@ def get_daemons_status() -> Dict[str, Any]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     os.makedirs(AVATARS_DIR, exist_ok=True)
+    # Sincronizar automáticamente el almacenamiento hacia SQLite en el arranque
+    try:
+        sync_all(STORAGE_DIR, DB_PATH)
+        logger.info("Base de datos SQLite sincronizada exitosamente.")
+    except Exception as e:
+        logger.error(f"Error sincronizando base de datos SQLite: {e}")
     yield
     # Limpieza al cerrar
     global _voice_cloner
@@ -329,73 +339,8 @@ def find_profile_path(user_id_or_name: str) -> Optional[str]:
 
 @app.get("/api/stats/global")
 def get_global_stats():
-    """Genera estadísticas consolidadas de todas las llamadas y participantes."""
-    raw_sessions_dir = os.path.join(STORAGE_DIR, "raw_sessions")
-
-    total_sessions = 0
-    total_speaking_seconds = 0.0
-    participants_summary = []
-    global_word_count = 0
-
-    for pf in get_all_profile_paths():
-        try:
-            with open(pf, "r", encoding="utf-8") as f:
-                pdata = json.load(f)
-                uid = pdata.get("user_id")
-                uname = pdata.get("username", "")
-                dname = pdata.get("display_name") or uname or uid
-                speaking_sec = float(pdata.get("total_speaking_seconds", 0.0))
-                total_speaking_seconds += speaking_sec
-                sessions_analyzed = int(pdata.get("total_sessions_analyzed", 0))
-                if sessions_analyzed > total_sessions:
-                    total_sessions = sessions_analyzed
-
-                # Vocabulario
-                dialect = pdata.get("dialect_markers", {}) or {}
-                words_dict = dialect.get("vocabulary_frequencies", {}) or pdata.get("lexicon_frequency", {}) or {}
-                user_words_total = sum(words_dict.values())
-                global_word_count += user_words_total
-
-                avatar_path = os.path.join(AVATARS_DIR, f"{uid}.png")
-                has_avatar = os.path.exists(avatar_path)
-
-                clean_sample = os.path.join(STORAGE_DIR, "clean_samples", uid, "sample_clean_prompt.wav")
-                has_voice = os.path.exists(clean_sample)
-
-                group_role = pdata.get("group_role", {}) or {}
-                comm_style = pdata.get("communication_style", {}) or {}
-
-                participants_summary.append({
-                    "user_id": uid,
-                    "username": uname,
-                    "display_name": dname,
-                    "total_speaking_seconds": speaking_sec,
-                    "total_speaking_formatted": f"{int(speaking_sec // 60)}m {int(speaking_sec % 60)}s",
-                    "cadence": comm_style.get("cadence", "moderado"),
-                    "primary_role": group_role.get("primary_role", "Participante"),
-                    "has_avatar": has_avatar,
-                    "avatar_url": f"/api/users/{uid}/avatar" if has_avatar else None,
-                    "has_voice_sample": has_voice,
-                    "total_words_spoken": user_words_total,
-                })
-        except Exception:
-            pass
-
-    physical_sessions_count = 0
-    if os.path.exists(raw_sessions_dir):
-        physical_sessions_count = len([d for d in os.listdir(raw_sessions_dir) if os.path.isdir(os.path.join(raw_sessions_dir, d))])
-
-    participants_summary.sort(key=lambda x: x["total_speaking_seconds"], reverse=True)
-
-    return {
-        "total_sessions_analyzed": total_sessions,
-        "total_sessions_recorded": max(total_sessions, physical_sessions_count),
-        "total_speaking_hours": round(total_speaking_seconds / 3600.0, 2),
-        "total_speaking_minutes": round(total_speaking_seconds / 60.0, 1),
-        "total_words_cataloged": global_word_count,
-        "participants_count": len(participants_summary),
-        "leaderboard": participants_summary,
-    }
+    """Genera estadísticas consolidadas a partir de la base de datos SQLite."""
+    return repo.get_global_stats()
 
 
 # ==============================================================================
@@ -404,128 +349,17 @@ def get_global_stats():
 
 @app.get("/api/users")
 def list_users():
-    """Lista todos los perfiles de usuario disponibles."""
-    users = []
-    for pf in get_all_profile_paths():
-        try:
-            with open(pf, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                uid = data.get("user_id")
-                uname = data.get("username", "")
-                dname = data.get("display_name") or uname or uid
-                avatar_path = os.path.join(AVATARS_DIR, f"{uid}.png")
-                has_avatar = os.path.exists(avatar_path)
-                clean_sample = os.path.join(STORAGE_DIR, "clean_samples", uid, "sample_clean_prompt.wav")
-                has_voice = os.path.exists(clean_sample)
-
-                dialect = data.get("dialect_markers", {}) or {}
-                words_dict = dialect.get("vocabulary_frequencies", {}) or data.get("lexicon_frequency", {}) or {}
-                user_words_total = sum(words_dict.values())
-                speaking_sec = float(data.get("total_speaking_seconds", 0.0))
-
-                group_role = data.get("group_role", {}) or {}
-                comm_style = data.get("communication_style", {}) or {}
-
-                users.append({
-                    "user_id": uid,
-                    "username": uname,
-                    "display_name": dname,
-                    "nicknames": data.get("nicknames", []) or [],
-                    "primary_role": group_role.get("primary_role", "Participante"),
-                    "humor_type": comm_style.get("humor_type", "conversacional"),
-                    "total_speaking_seconds": speaking_sec,
-                    "speaking_formatted": f"{int(speaking_sec // 60)}m",
-                    "words_count": user_words_total,
-                    "total_sessions_analyzed": int(data.get("total_sessions_analyzed", 0)),
-                    "has_avatar": has_avatar,
-                    "avatar_url": f"/api/users/{uid}/avatar" if has_avatar else None,
-                    "has_voice_sample": has_voice,
-                })
-        except Exception:
-            pass
-
-    users.sort(key=lambda x: x["total_speaking_seconds"], reverse=True)
-    return users
+    """Lista todos los perfiles de usuario disponibles desde SQLite."""
+    return repo.list_users()
 
 
 @app.get("/api/users/{user_id}")
 def get_user_detail(user_id: str):
-    """Devuelve la ficha técnica psicológica y sociolingüística completa de un usuario."""
-    profile_path = find_profile_path(user_id)
-    if not profile_path or not os.path.exists(profile_path):
+    """Devuelve la ficha técnica psicológica y sociolingüística completa de un usuario desde SQLite."""
+    detail = repo.get_user_detail(user_id)
+    if not detail:
         raise HTTPException(status_code=404, detail=f"Usuario {user_id} no encontrado")
-
-    with open(profile_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    uid = data.get("user_id")
-    uname = data.get("username", "")
-    dname = data.get("display_name") or uname or uid
-
-    # Normalizar Big Five quotes a strings
-    big_five_formatted = {}
-    raw_bf = data.get("big_five", {}) or {}
-    for trait_key, trait_val in raw_bf.items():
-        if isinstance(trait_val, dict):
-            raw_quotes = trait_val.get("evidence_quotes", []) or []
-            clean_quotes = []
-            for q in raw_quotes:
-                if isinstance(q, dict):
-                    clean_quotes.append(q.get("quote", str(q)))
-                elif isinstance(q, str):
-                    clean_quotes.append(q)
-            big_five_formatted[trait_key] = {
-                "score": float(trait_val.get("score", 0.5)),
-                "confidence": float(trait_val.get("confidence", 0.5)),
-                "evidence_quotes": clean_quotes,
-            }
-        else:
-            big_five_formatted[trait_key] = {"score": 0.5, "confidence": 0.5, "evidence_quotes": []}
-
-    # Vocabulario
-    dialect = data.get("dialect_markers", {}) or {}
-    vocab_freq = dialect.get("vocabulary_frequencies", {}) or data.get("lexicon_frequency", {}) or {}
-    sorted_words = sorted(vocab_freq.items(), key=lambda x: x[1], reverse=True)
-    total_words = sum(vocab_freq.values())
-
-    # Arquetipo
-    group_role = data.get("group_role", {}) or {}
-    comm_style = data.get("communication_style", {}) or {}
-    idioms = (dialect.get("favorite_slang", []) or []) + (dialect.get("discourse_fillers", []) or [])
-
-    avatar_path = os.path.join(AVATARS_DIR, f"{uid}.png")
-    has_avatar = os.path.exists(avatar_path)
-    clean_sample = os.path.join(STORAGE_DIR, "clean_samples", uid, "sample_clean_prompt.wav")
-    has_voice = os.path.exists(clean_sample)
-
-    return {
-        "user_id": uid,
-        "username": uname,
-        "display_name": dname,
-        "nicknames": data.get("nicknames", []) or [],
-        "total_speaking_seconds": float(data.get("total_speaking_seconds", 0.0)),
-        "total_sessions_analyzed": int(data.get("total_sessions_analyzed", 0)),
-        "speaking_formatted": f"{int(float(data.get('total_speaking_seconds', 0.0)) // 60)}m",
-        "has_avatar": has_avatar,
-        "avatar_url": f"/api/users/{uid}/avatar" if has_avatar else None,
-        "has_voice_sample": has_voice,
-        "big_five": big_five_formatted,
-        "communication_style": comm_style,
-        "group_role": group_role,
-        "dialect_markers": dialect,
-        "archetype": {
-            "primary_role": group_role.get("primary_role", "Participante"),
-            "secondary_role": group_role.get("description", ""),
-            "humor_style": comm_style.get("humor_type", "Conversacional"),
-            "dialogue_cadence": comm_style.get("cadence", "Moderado"),
-            "preferred_idioms": idioms,
-        },
-        "lexicon": {
-            "top_words": sorted_words,
-            "total_words": total_words,
-            "unique_words": len(sorted_words),
-        },
-    }
+    return detail
 
 
 class UserUpdateRequest(BaseModel):
@@ -538,33 +372,41 @@ class UserUpdateRequest(BaseModel):
 
 @app.post("/api/users/{user_id}")
 def update_user_profile(user_id: str, payload: UserUpdateRequest):
-    """Actualiza apodos, notas de contexto, rol o nombre visible."""
-    profile_path = find_profile_path(user_id)
-    if not profile_path or not os.path.exists(profile_path):
+    """Actualiza apodos, notas de contexto, rol o nombre visible en SQLite y disco."""
+    ok = repo.update_user_metadata(
+        user_id=user_id,
+        display_name=payload.display_name,
+        nicknames=payload.nicknames,
+        role=payload.role,
+        humor=payload.humor,
+    )
+    if not ok:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
-    with open(profile_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    # Sincronizar archivo en disco si existe
+    profile_path = find_profile_path(user_id)
+    if profile_path and os.path.exists(profile_path):
+        try:
+            with open(profile_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if payload.display_name is not None:
+                data["display_name"] = payload.display_name.strip()
+            if payload.nicknames is not None:
+                data["nicknames"] = [n.strip() for n in payload.nicknames if n.strip()]
+            if payload.role is not None:
+                if "group_role" not in data:
+                    data["group_role"] = {}
+                data["group_role"]["primary_role"] = payload.role.strip()
+            if payload.humor is not None:
+                if "communication_style" not in data:
+                    data["communication_style"] = {}
+                data["communication_style"]["humor_type"] = payload.humor.strip()
+            with open(profile_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
 
-    if payload.display_name is not None:
-        data["display_name"] = payload.display_name.strip()
-    if payload.nicknames is not None:
-        data["nicknames"] = [n.strip() for n in payload.nicknames if n.strip()]
-    if payload.notes is not None:
-        data["notes"] = [n.strip() for n in payload.notes if n.strip()]
-    if payload.role is not None:
-        if "group_role" not in data:
-            data["group_role"] = {}
-        data["group_role"]["primary_role"] = payload.role.strip()
-    if payload.humor is not None:
-        if "communication_style" not in data:
-            data["communication_style"] = {}
-        data["communication_style"]["humor_type"] = payload.humor.strip()
-
-    with open(profile_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-    return {"status": "success", "user": data}
+    return {"status": "success", "user_id": user_id}
 
 
 @app.post("/api/users/{user_id}/avatar")

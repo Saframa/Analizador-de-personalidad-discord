@@ -4,10 +4,7 @@ import {
   Send, 
   Trash2, 
   Volume2, 
-  RotateCw, 
-  User, 
-  Bot,
-  SlidersHorizontal
+  RotateCw
 } from 'lucide-react';
 import { sendChatMessage, clearChatHistory, synthesizeSpeech, fetchUserDetail } from '../api';
 
@@ -24,7 +21,6 @@ export default function ChatDrawer({ userId, onClose }) {
   useEffect(() => {
     if (userId) {
       fetchUserDetail(userId).then(setUserProfile).catch(console.error);
-      // Mensaje de bienvenida inicial simulado
       setMessages([
         {
           role: 'system_greeting',
@@ -113,9 +109,9 @@ export default function ChatDrawer({ userId, onClose }) {
       <div className="w-full max-w-xl bg-dark-900 border-l border-dark-700 h-full flex flex-col shadow-2xl animate-in slide-in-from-right duration-200">
         
         {/* Header del Chat */}
-        <div className="h-16 px-5 border-b border-dark-700 bg-dark-850 flex items-center justify-between">
+        <div className="h-14 px-5 border-b border-dark-700 bg-dark-850 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="w-9 h-9 rounded-xl bg-dark-800 border border-dark-650 overflow-hidden flex items-center justify-center text-xs font-bold text-slate-300">
+            <div className="w-8 h-8 rounded-xs bg-dark-800 border border-dark-650 overflow-hidden flex items-center justify-center text-xs font-bold text-slate-300 flex-shrink-0">
               {userProfile?.has_avatar ? (
                 <img
                   src={`http://127.0.0.1:8000${userProfile.avatar_url}`}
@@ -129,7 +125,7 @@ export default function ChatDrawer({ userId, onClose }) {
             <div>
               <div className="text-sm font-bold text-slate-100 flex items-center space-x-2">
                 <span>{displayName}</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-dark-800 text-indigo-300 border border-dark-700 font-normal">
+                <span className="text-[10px] px-1.5 py-0.5 rounded-xs bg-dark-800 text-indigo-300 border border-dark-700 font-normal">
                   Gemelo Digital
                 </span>
               </div>
@@ -144,7 +140,7 @@ export default function ChatDrawer({ userId, onClose }) {
             <select
               value={backend}
               onChange={(e) => setBackend(e.target.value)}
-              className="text-xs bg-dark-800 text-slate-300 border border-dark-700 rounded-lg px-2 py-1 focus:outline-none"
+              className="text-xs bg-dark-800 text-slate-300 border border-dark-700 rounded-xs px-2 py-1 focus:outline-none"
               title="Motor LLM"
             >
               <option value="auto">Motor: Auto</option>
@@ -155,31 +151,31 @@ export default function ChatDrawer({ userId, onClose }) {
             {/* Reiniciar chat */}
             <button
               onClick={handleClearChat}
-              className="p-1.5 rounded-lg bg-dark-800 hover:bg-dark-750 text-slate-400 hover:text-slate-200 transition-colors"
+              className="p-1.5 rounded-xs bg-dark-800 hover:bg-dark-750 text-slate-400 hover:text-slate-200 border border-dark-700 transition-colors"
               title="Reiniciar chat"
             >
-              <Trash2 size={16} />
+              <Trash2 size={15} />
             </button>
 
             {/* Cerrar Drawer */}
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg bg-dark-800 hover:bg-dark-750 text-slate-400 hover:text-white transition-colors"
+              className="p-1.5 rounded-xs bg-dark-800 hover:bg-dark-750 text-slate-400 hover:text-white border border-dark-700 transition-colors"
               title="Cerrar chat"
             >
-              <X size={18} />
+              <X size={17} />
             </button>
           </div>
         </div>
 
         {/* Zona de Mensajes */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto p-4 space-y-3.5">
           {messages.map((msg, index) => {
             if (msg.role === 'system_greeting') {
               return (
                 <div
                   key={index}
-                  className="p-3 rounded-lg bg-dark-850/80 border border-dark-750 text-center text-xs text-slate-400"
+                  className="p-3 rounded-xs bg-dark-850/80 border border-dark-750 text-center text-xs text-slate-400"
                 >
                   {msg.content}
                 </div>
@@ -190,7 +186,7 @@ export default function ChatDrawer({ userId, onClose }) {
               return (
                 <div
                   key={index}
-                  className="p-3 rounded-lg bg-rose-950/40 border border-rose-900/60 text-xs text-rose-300"
+                  className="p-3 rounded-xs bg-rose-950/40 border border-rose-900/60 text-xs text-rose-300"
                 >
                   {msg.content}
                 </div>
@@ -205,17 +201,17 @@ export default function ChatDrawer({ userId, onClose }) {
                 className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
               >
                 <div
-                  className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm ${
+                  className={`max-w-[85%] rounded-xs px-3.5 py-2.5 text-sm ${
                     isUser
-                      ? 'bg-indigo-600 text-white rounded-br-xs'
-                      : 'bg-dark-850 border border-dark-700/80 text-slate-200 rounded-bl-xs'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-dark-850 border border-dark-700 text-slate-200'
                   }`}
                 >
                   <p className="whitespace-pre-wrap leading-relaxed select-text">{msg.content}</p>
 
                   {/* Acciones debajo de la respuesta del gemelo */}
                   {!isUser && (
-                    <div className="mt-2 pt-1.5 border-t border-dark-750/70 flex items-center justify-between text-[11px] text-slate-500">
+                    <div className="mt-2 pt-1.5 border-t border-dark-750 flex items-center justify-between text-[11px] text-slate-500">
                       <div className="flex items-center space-x-1.5 font-mono">
                         <span>{msg.model_used || 'LLM'}</span>
                         {msg.timestamp && <span>· {msg.timestamp}</span>}
@@ -226,7 +222,7 @@ export default function ChatDrawer({ userId, onClose }) {
                         <button
                           onClick={() => handlePlayVoice(msg.content, index)}
                           disabled={playingAudioIdx === index}
-                          className="flex items-center space-x-1 text-slate-400 hover:text-indigo-300 transition-colors p-1 rounded hover:bg-dark-800"
+                          className="flex items-center space-x-1 text-slate-400 hover:text-indigo-300 transition-colors p-1 rounded-xs hover:bg-dark-800"
                           title="Escuchar con voz clonada F5-TTS"
                         >
                           <Volume2 size={13} className={playingAudioIdx === index ? "text-indigo-400 animate-pulse" : ""} />
@@ -262,12 +258,12 @@ export default function ChatDrawer({ userId, onClose }) {
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             disabled={loading}
-            className="flex-1 px-4 py-2.5 rounded-xl bg-dark-900 border border-dark-700 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+            className="flex-1 px-3.5 py-2 rounded-xs bg-dark-900 border border-dark-700 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
           />
           <button
             type="submit"
             disabled={loading || !inputText.trim()}
-            className="p-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:hover:bg-indigo-600 text-white transition-colors"
+            className="p-2 rounded-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:hover:bg-indigo-600 text-white transition-colors"
             title="Enviar mensaje"
           >
             <Send size={16} />

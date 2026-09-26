@@ -1,13 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Volume2, 
-  Mic, 
-  Play, 
   RotateCw, 
   Download, 
   Check, 
-  AlertCircle,
-  FileAudio
+  AlertCircle
 } from 'lucide-react';
 import { fetchUsers, synthesizeSpeech } from '../api';
 
@@ -29,10 +26,9 @@ export default function TtsStudioView() {
 
   useEffect(() => {
     fetchUsers().then((data) => {
-      const uList = data.users || [];
+      const uList = Array.isArray(data) ? data : (data?.users || []);
       setUsers(uList);
       if (uList.length > 0) {
-        // Seleccionar por defecto el primero que tenga muestra de voz
         const withVoice = uList.find((u) => u.has_voice_sample);
         setSelectedUserId(withVoice ? withVoice.user_id : uList[0].user_id);
       }
@@ -71,9 +67,9 @@ export default function TtsStudioView() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Panel de Configuración y Selección de Usuario */}
-        <div className="p-5 rounded-xl bg-dark-900 border border-dark-700 space-y-4">
+        <div className="p-5 rounded-xs bg-dark-900 border border-dark-700 space-y-4">
           <div className="border-b border-dark-700/60 pb-3">
             <h2 className="font-semibold text-slate-200 text-sm">
               Selección de Voz
@@ -91,7 +87,7 @@ export default function TtsStudioView() {
                   setSelectedUserId(e.target.value);
                   setAudioUrl(null);
                 }}
-                className="w-full px-3 py-2 rounded-lg bg-dark-850 border border-dark-700 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                className="w-full px-3 py-2 rounded-xs bg-dark-850 border border-dark-700 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
               >
                 {users.map((u) => (
                   <option key={u.user_id} value={u.user_id}>
@@ -102,7 +98,7 @@ export default function TtsStudioView() {
             </div>
 
             {selectedUser && (
-              <div className="p-3.5 rounded-lg bg-dark-850 border border-dark-750 space-y-2 text-xs">
+              <div className="p-3.5 rounded-xs bg-dark-850 border border-dark-750 space-y-2 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="text-slate-400">Estado de muestra:</span>
                   {selectedUser.has_voice_sample ? (
@@ -130,7 +126,7 @@ export default function TtsStudioView() {
         </div>
 
         {/* Panel de Texto y Síntesis */}
-        <div className="lg:col-span-2 p-5 rounded-xl bg-dark-900 border border-dark-700 space-y-4 flex flex-col justify-between">
+        <div className="lg:col-span-2 p-5 rounded-xs bg-dark-900 border border-dark-700 space-y-4 flex flex-col justify-between">
           <div className="space-y-4">
             <div className="border-b border-dark-700/60 pb-3 flex items-center justify-between">
               <h2 className="font-semibold text-slate-200 text-sm">
@@ -146,7 +142,7 @@ export default function TtsStudioView() {
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               placeholder="Escribe la frase que quieres que diga..."
-              className="w-full p-3 rounded-lg bg-dark-850 border border-dark-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none font-sans"
+              className="w-full p-3 rounded-xs bg-dark-850 border border-dark-700 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none font-sans"
             />
 
             {/* Frases rápidas */}
@@ -159,7 +155,7 @@ export default function TtsStudioView() {
                   <button
                     key={idx}
                     onClick={() => setInputText(prompt)}
-                    className="text-left text-[11px] px-2.5 py-1 rounded bg-dark-850 hover:bg-dark-800 text-slate-400 hover:text-slate-200 border border-dark-750 transition-colors"
+                    className="text-left text-[11px] px-2.5 py-1 rounded-xs bg-dark-850 hover:bg-dark-800 text-slate-400 hover:text-slate-200 border border-dark-750 transition-colors"
                   >
                     "{prompt.slice(0, 32)}..."
                   </button>
@@ -170,7 +166,7 @@ export default function TtsStudioView() {
 
           <div className="space-y-3 pt-4 border-t border-dark-700/60">
             {error && (
-              <div className="p-3 rounded-lg bg-rose-950/40 border border-rose-900/60 text-xs text-rose-300">
+              <div className="p-3 rounded-xs bg-rose-950/40 border border-rose-900/60 text-xs text-rose-300">
                 {error}
               </div>
             )}
@@ -179,7 +175,7 @@ export default function TtsStudioView() {
               <button
                 onClick={handleSynthesize}
                 disabled={loading || !inputText.trim() || !selectedUser?.has_voice_sample}
-                className="flex-1 py-2.5 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center justify-center space-x-2 transition-colors shadow-sm"
+                className="flex-1 py-2.5 px-4 rounded-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center justify-center space-x-2 transition-colors shadow-sm"
               >
                 {loading ? (
                   <>
@@ -198,7 +194,7 @@ export default function TtsStudioView() {
                 <a
                   href={audioUrl}
                   download={`tts_${selectedUserId}.wav`}
-                  className="p-2.5 rounded-lg bg-dark-850 hover:bg-dark-800 text-slate-300 border border-dark-700 transition-colors"
+                  className="p-2.5 rounded-xs bg-dark-850 hover:bg-dark-800 text-slate-300 border border-dark-700 transition-colors"
                   title="Descargar archivo WAV"
                 >
                   <Download size={16} />

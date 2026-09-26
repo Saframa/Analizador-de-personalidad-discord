@@ -7,10 +7,7 @@ import {
   Clock, 
   BookOpen, 
   Sliders, 
-  Volume2, 
-  Mic, 
   Quote, 
-  Sparkles, 
   RotateCw,
   Edit2,
   Save,
@@ -125,11 +122,11 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
   const maxWordFreq = filteredWords[0]?.[1] || 1;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/75 backdrop-blur-xs select-none">
-      <div className="bg-dark-900 border border-dark-700 rounded-2xl w-full max-w-5xl h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-xs select-none">
+      <div className="bg-dark-900 border border-dark-700 rounded-xs w-full max-w-5xl h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         
         {/* Barra Superior de la Inspección */}
-        <div className="h-16 px-6 border-b border-dark-700 bg-dark-850 flex items-center justify-between">
+        <div className="h-14 px-5 border-b border-dark-700 bg-dark-850 flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <span className="text-xs uppercase tracking-wider font-semibold text-slate-400">
               Inspección de Perfil
@@ -144,7 +141,7 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
             {/* Botón Chat con Gemelo Digital arriba a la derecha */}
             <button
               onClick={() => onOpenChat && onOpenChat(userId)}
-              className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center space-x-2 transition-colors shadow-sm"
+              className="px-3.5 py-1.5 rounded-xs bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center space-x-2 transition-colors shadow-sm"
               title="Abrir chat con gemelo digital"
             >
               <MessageSquare size={15} />
@@ -154,7 +151,7 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
             {/* Cerrar modal */}
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 text-slate-400 hover:text-white transition-colors"
+              className="p-1.5 rounded-xs bg-dark-800 hover:bg-dark-700 text-slate-400 hover:text-white border border-dark-700 transition-colors"
               title="Cerrar"
             >
               <X size={18} />
@@ -173,18 +170,18 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
             <p className="font-semibold">{error}</p>
             <button
               onClick={loadData}
-              className="mt-3 px-4 py-1.5 rounded-lg bg-dark-800 text-slate-200 text-xs"
+              className="mt-3 px-4 py-1.5 rounded-xs bg-dark-800 text-slate-200 text-xs border border-dark-700"
             >
               Reintentar
             </button>
           </div>
         ) : (
-          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          <div className="flex-1 overflow-y-auto p-5 space-y-5">
             {/* Header del Perfil: Foto, Nombre, Apodos, Stats */}
-            <div className="p-5 rounded-xl bg-dark-850 border border-dark-700/80 flex flex-col md:flex-row items-start md:items-center justify-between gap-5">
+            <div className="p-4 rounded-xs bg-dark-850 border border-dark-700 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div className="flex items-start sm:items-center space-x-4">
-                {/* Avatar con botón de subida manual */}
-                <div className="relative group w-20 h-20 rounded-2xl bg-dark-800 border-2 border-dark-650 overflow-hidden flex-shrink-0 flex items-center justify-center text-xl font-bold text-slate-300">
+                {/* Avatar cuadrado con botón de subida manual */}
+                <div className="relative group w-20 h-20 rounded-xs bg-dark-800 border border-dark-600 overflow-hidden flex-shrink-0 flex items-center justify-center text-xl font-bold text-slate-300">
                   {user?.has_avatar ? (
                     <img
                       src={`http://127.0.0.1:8000${user.avatar_url}?t=${avatarTimestamp}`}
@@ -199,7 +196,7 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     disabled={avatarUploading}
-                    className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-[10px] text-slate-200 transition-opacity p-1 text-center"
+                    className="absolute inset-0 bg-black/80 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-[10px] text-slate-200 transition-opacity p-1 text-center"
                     title="Cargar foto manualmente"
                   >
                     <Upload size={16} className="mb-0.5" />
@@ -224,7 +221,7 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
                         </h2>
                         <button
                           onClick={() => setIsEditingMeta(true)}
-                          className="p-1 rounded text-slate-500 hover:text-slate-300"
+                          className="p-1 rounded-xs text-slate-500 hover:text-slate-300"
                           title="Editar nombre y apodos"
                         >
                           <Edit2 size={13} />
@@ -239,7 +236,7 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
                           {user.nicknames.map((nick, idx) => (
                             <span
                               key={idx}
-                              className="text-[11px] px-2 py-0.5 rounded bg-dark-800 text-slate-300 border border-dark-700"
+                              className="text-[11px] px-2 py-0.5 rounded-xs bg-dark-800 text-slate-300 border border-dark-700"
                             >
                               {nick}
                             </span>
@@ -254,26 +251,26 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
                         value={editDisplayName}
                         onChange={(e) => setEditDisplayName(e.target.value)}
                         placeholder="Nombre para mostrar"
-                        className="px-2.5 py-1 rounded bg-dark-800 border border-dark-600 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 w-64"
+                        className="px-2.5 py-1 rounded-xs bg-dark-800 border border-dark-600 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 w-64"
                       />
                       <input
                         type="text"
                         value={editNicknames}
                         onChange={(e) => setEditNicknames(e.target.value)}
                         placeholder="Apodos separados por comas"
-                        className="px-2.5 py-1 rounded bg-dark-800 border border-dark-600 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 w-64"
+                        className="px-2.5 py-1 rounded-xs bg-dark-800 border border-dark-600 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 w-64"
                       />
                       <div className="flex space-x-2">
                         <button
                           onClick={handleSaveMeta}
-                          className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium flex items-center space-x-1"
+                          className="px-2.5 py-1 rounded-xs bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium flex items-center space-x-1"
                         >
                           <Save size={12} />
                           <span>Guardar</span>
                         </button>
                         <button
                           onClick={() => setIsEditingMeta(false)}
-                          className="px-2.5 py-1 rounded bg-dark-750 text-slate-400 hover:text-slate-200 text-xs"
+                          className="px-2.5 py-1 rounded-xs bg-dark-750 text-slate-400 hover:text-slate-200 text-xs"
                         >
                           Cancelar
                         </button>
@@ -284,7 +281,7 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
               </div>
 
               {/* Estadísticas de Locución */}
-              <div className="flex items-center space-x-5 text-xs text-slate-300 border-t md:border-t-0 md:border-l border-dark-750 pt-3 md:pt-0 md:pl-6">
+              <div className="flex items-center space-x-5 text-xs text-slate-300 border-t md:border-t-0 md:border-l border-dark-750 pt-3 md:pt-0 md:pl-5">
                 <div>
                   <div className="text-slate-500 text-[11px]">Voz Registrada</div>
                   <div className="text-sm font-bold text-slate-200 mt-0.5 flex items-center space-x-1.5">
@@ -316,10 +313,10 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
             </div>
 
             {/* Grid 2 Columnas: Rasgos Big Five vs Arquetipo & Modismos */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               
               {/* Columna Izquierda: Rasgos Big Five Moldeados */}
-              <div className="p-5 rounded-xl bg-dark-850 border border-dark-700/80 space-y-4">
+              <div className="p-4 rounded-xs bg-dark-850 border border-dark-700 space-y-4">
                 <div className="flex items-center justify-between border-b border-dark-700/60 pb-3">
                   <div className="flex items-center space-x-2">
                     <Sliders size={16} className="text-indigo-400" />
@@ -332,7 +329,7 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
                   </span>
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-3.5">
                   {Object.entries(BIG_FIVE_NAMES).map(([traitKey, info]) => {
                     const traitData = bigFive[traitKey] || { score: 0.5, confidence: 0.5, evidence_quotes: [] };
                     const score = traitData.score ?? 0.5;
@@ -340,30 +337,33 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
                     const quotes = traitData.evidence_quotes || [];
 
                     return (
-                      <div key={traitKey} className="space-y-1.5 p-3 rounded-lg bg-dark-900/60 border border-dark-800">
+                      <div key={traitKey} className="space-y-1.5 p-3 rounded-xs bg-dark-900 border border-dark-750">
                         <div className="flex items-center justify-between text-xs">
                           <span className="font-medium text-slate-300">{info.name}</span>
                           <span className="font-mono font-semibold text-indigo-300">{score.toFixed(2)} ({percent}%)</span>
                         </div>
-                        <div className="w-full bg-dark-800 rounded-full h-2 overflow-hidden">
+                        <div className="w-full bg-dark-800 rounded-none h-2 overflow-hidden">
                           <div
-                            className="bg-indigo-500 h-full rounded-full transition-all duration-500"
+                            className="bg-indigo-500 h-full rounded-none transition-all duration-500"
                             style={{ width: `${percent}%` }}
                           />
                         </div>
                         <p className="text-[11px] text-slate-500">{info.desc}</p>
                         
                         {quotes.length > 0 && (
-                          <div className="mt-2 pt-2 border-t border-dark-800/80 space-y-1">
+                          <div className="mt-2 pt-2 border-t border-dark-800 space-y-1">
                             <span className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold flex items-center space-x-1">
                               <Quote size={10} />
                               <span>Citas de Evidencia</span>
                             </span>
-                            {quotes.slice(0, 2).map((quote, qIdx) => (
-                              <p key={qIdx} className="text-[11px] text-slate-400 italic pl-2 border-l border-dark-700">
-                                "{quote}"
-                              </p>
-                            ))}
+                            {quotes.slice(0, 2).map((quote, qIdx) => {
+                              const quoteText = typeof quote === 'string' ? quote : (quote?.quote || JSON.stringify(quote));
+                              return (
+                                <p key={qIdx} className="text-[11px] text-slate-400 italic pl-2 border-l border-dark-700">
+                                  "{quoteText}"
+                                </p>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
@@ -373,38 +373,38 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
               </div>
 
               {/* Columna Derecha: Arquetipo, Estilo de Humor y Cadencia */}
-              <div className="space-y-6">
+              <div className="space-y-5">
                 {/* Arquetipo */}
-                <div className="p-5 rounded-xl bg-dark-850 border border-dark-700/80 space-y-4">
-                  <div className="border-b border-dark-700/60 pb-3">
+                <div className="p-4 rounded-xs bg-dark-850 border border-dark-700 space-y-3.5">
+                  <div className="border-b border-dark-700/60 pb-2.5">
                     <h3 className="font-semibold text-slate-200 text-sm">
                       Arquetipo y Rol Conversacional
                     </h3>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                    <div className="p-3 rounded-lg bg-dark-900/60 border border-dark-800">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                    <div className="p-3 rounded-xs bg-dark-900 border border-dark-750">
                       <div className="text-slate-500 text-[11px]">Rol Principal</div>
                       <div className="font-semibold text-slate-200 mt-1">
                         {archetype.primary_role || 'No clasificado aún'}
                       </div>
                     </div>
 
-                    <div className="p-3 rounded-lg bg-dark-900/60 border border-dark-800">
+                    <div className="p-3 rounded-xs bg-dark-900 border border-dark-750">
                       <div className="text-slate-500 text-[11px]">Rol Secundario</div>
                       <div className="font-semibold text-slate-200 mt-1">
                         {archetype.secondary_role || 'No clasificado'}
                       </div>
                     </div>
 
-                    <div className="p-3 rounded-lg bg-dark-900/60 border border-dark-800 sm:col-span-2">
+                    <div className="p-3 rounded-xs bg-dark-900 border border-dark-750 sm:col-span-2">
                       <div className="text-slate-500 text-[11px]">Estilo de Humor</div>
                       <div className="font-semibold text-slate-200 mt-1">
                         {archetype.humor_style || 'Neutro / Conversacional'}
                       </div>
                     </div>
 
-                    <div className="p-3 rounded-lg bg-dark-900/60 border border-dark-800 sm:col-span-2">
+                    <div className="p-3 rounded-xs bg-dark-900 border border-dark-750 sm:col-span-2">
                       <div className="text-slate-500 text-[11px]">Cadencia y Turno de Habla</div>
                       <div className="font-semibold text-slate-200 mt-1">
                         {archetype.dialogue_cadence || 'Moderada'}
@@ -415,14 +415,14 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
                   {/* Modismos y Muletillas */}
                   {archetype.preferred_idioms && archetype.preferred_idioms.length > 0 && (
                     <div className="pt-2">
-                      <div className="text-xs text-slate-400 font-medium mb-2">
+                      <div className="text-xs text-slate-400 font-medium mb-1.5">
                         Modismos y Muletillas Clave:
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="flex flex-wrap gap-1">
                         {archetype.preferred_idioms.map((idiom, idx) => (
                           <span
                             key={idx}
-                            className="px-2.5 py-1 rounded-md bg-dark-900 border border-dark-750 text-indigo-300 text-xs font-mono"
+                            className="px-2 py-0.5 rounded-xs bg-dark-900 border border-dark-750 text-indigo-300 text-xs font-mono"
                           >
                             {idiom}
                           </span>
@@ -433,8 +433,8 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
                 </div>
 
                 {/* Diccionario de Palabras Utilizadas */}
-                <div className="p-5 rounded-xl bg-dark-850 border border-dark-700/80 space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-dark-700/60 pb-3">
+                <div className="p-4 rounded-xs bg-dark-850 border border-dark-700 space-y-3.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-dark-700/60 pb-2.5">
                     <div>
                       <h3 className="font-semibold text-slate-200 text-sm">
                         Diccionario y Frecuencia de Palabras
@@ -448,7 +448,7 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
                     <div className="flex items-center space-x-2">
                       <button
                         onClick={() => setFilterStopwords(!filterStopwords)}
-                        className={`px-2.5 py-1 rounded text-[11px] border font-medium transition-colors flex items-center space-x-1 ${
+                        className={`px-2.5 py-1 rounded-xs text-[11px] border font-medium transition-colors flex items-center space-x-1 ${
                           filterStopwords
                             ? 'bg-indigo-950/60 border-indigo-700/70 text-indigo-300'
                             : 'bg-dark-800 border-dark-700 text-slate-400'
@@ -467,26 +467,26 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
                     placeholder="Filtrar palabra en diccionario..."
                     value={wordSearch}
                     onChange={(e) => setWordSearch(e.target.value)}
-                    className="w-full px-3 py-1.5 rounded-lg bg-dark-900 border border-dark-750 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                    className="w-full px-3 py-1.5 rounded-xs bg-dark-900 border border-dark-750 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                   />
 
                   {/* Lista de palabras con frecuencias */}
                   <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1">
-                    {filteredWords.slice(0, 40).map(([word, count], idx) => {
+                    {filteredWords.slice(0, 50).map(([word, count], idx) => {
                       const barWidth = Math.round((count / maxWordFreq) * 100);
                       return (
                         <div
                           key={idx}
-                          className="flex items-center justify-between p-2 rounded bg-dark-900/80 border border-dark-800 text-xs"
+                          className="flex items-center justify-between p-2 rounded-xs bg-dark-900 border border-dark-750 text-xs"
                         >
                           <div className="flex items-center space-x-2 flex-1 mr-3">
                             <span className="font-mono text-slate-300 font-medium">{word}</span>
                           </div>
 
                           <div className="flex items-center space-x-3 w-40">
-                            <div className="flex-1 bg-dark-800 rounded-full h-1.5 overflow-hidden">
+                            <div className="flex-1 bg-dark-800 rounded-none h-1.5 overflow-hidden">
                               <div
-                                className="bg-cyan-500 h-full rounded-full"
+                                className="bg-cyan-500 h-full rounded-none"
                                 style={{ width: `${barWidth}%` }}
                               />
                             </div>

@@ -72,7 +72,7 @@ export default function GlobalStatsView({ onSelectUser }) {
         </div>
         <button
           onClick={loadData}
-          className="p-2 rounded-lg bg-dark-850 hover:bg-dark-700 text-slate-400 hover:text-slate-200 border border-dark-700 transition-colors"
+          className="p-2 rounded-xs bg-dark-850 hover:bg-dark-700 text-slate-400 hover:text-slate-200 border border-dark-700 transition-colors"
           title="Actualizar estadísticas"
         >
           <RotateCw size={16} className={loading ? "animate-spin" : ""} />
@@ -81,8 +81,8 @@ export default function GlobalStatsView({ onSelectUser }) {
 
       {/* Tarjetas de Métricas Clave */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-4 rounded-xl bg-dark-900 border border-dark-700 shadow-sm flex items-center space-x-3.5">
-          <div className="p-2.5 rounded-lg bg-dark-800 text-indigo-400 border border-dark-700">
+        <div className="p-4 rounded-xs bg-dark-900 border border-dark-700 shadow-sm flex items-center space-x-3.5">
+          <div className="p-2.5 rounded-xs bg-dark-800 text-indigo-400 border border-dark-700">
             <Layers size={22} />
           </div>
           <div>
@@ -91,8 +91,8 @@ export default function GlobalStatsView({ onSelectUser }) {
           </div>
         </div>
 
-        <div className="p-4 rounded-xl bg-dark-900 border border-dark-700 shadow-sm flex items-center space-x-3.5">
-          <div className="p-2.5 rounded-lg bg-dark-800 text-cyan-400 border border-dark-700">
+        <div className="p-4 rounded-xs bg-dark-900 border border-dark-700 shadow-sm flex items-center space-x-3.5">
+          <div className="p-2.5 rounded-xs bg-dark-800 text-cyan-400 border border-dark-700">
             <Clock size={22} />
           </div>
           <div>
@@ -101,8 +101,8 @@ export default function GlobalStatsView({ onSelectUser }) {
           </div>
         </div>
 
-        <div className="p-4 rounded-xl bg-dark-900 border border-dark-700 shadow-sm flex items-center space-x-3.5">
-          <div className="p-2.5 rounded-lg bg-dark-800 text-emerald-400 border border-dark-700">
+        <div className="p-4 rounded-xs bg-dark-900 border border-dark-700 shadow-sm flex items-center space-x-3.5">
+          <div className="p-2.5 rounded-xs bg-dark-800 text-emerald-400 border border-dark-700">
             <BookOpen size={22} />
           </div>
           <div>
@@ -113,8 +113,8 @@ export default function GlobalStatsView({ onSelectUser }) {
           </div>
         </div>
 
-        <div className="p-4 rounded-xl bg-dark-900 border border-dark-700 shadow-sm flex items-center space-x-3.5">
-          <div className="p-2.5 rounded-lg bg-dark-800 text-amber-400 border border-dark-700">
+        <div className="p-4 rounded-xs bg-dark-900 border border-dark-700 shadow-sm flex items-center space-x-3.5">
+          <div className="p-2.5 rounded-xs bg-dark-800 text-amber-400 border border-dark-700">
             <Users size={22} />
           </div>
           <div>
@@ -125,7 +125,7 @@ export default function GlobalStatsView({ onSelectUser }) {
       </div>
 
       {/* Tabla y Ranking de Habla */}
-      <div className="bg-dark-900 border border-dark-700 rounded-xl p-5 shadow-sm space-y-4">
+      <div className="bg-dark-900 border border-dark-700 rounded-xs p-5 shadow-sm space-y-4">
         <div className="flex items-center justify-between border-b border-dark-700/60 pb-3">
           <div className="flex items-center space-x-2">
             <TrendingUp size={18} className="text-indigo-400" />
@@ -138,21 +138,21 @@ export default function GlobalStatsView({ onSelectUser }) {
           </span>
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           {stats?.leaderboard?.map((item, index) => {
             const percentOfTop = Math.round((item.total_speaking_seconds / maxSpeakingSec) * 100);
             return (
               <div
                 key={item.user_id}
                 onClick={() => onSelectUser && onSelectUser(item.user_id)}
-                className="group p-3 rounded-lg bg-dark-850 hover:bg-dark-800/80 border border-dark-700/70 hover:border-dark-600 transition-all cursor-pointer"
+                className="group p-3 rounded-xs bg-dark-850 hover:bg-dark-800/80 border border-dark-700/70 hover:border-dark-600 transition-all cursor-pointer"
               >
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center space-x-3">
                     <span className="text-xs font-mono font-medium text-slate-500 w-5">
                       #{index + 1}
                     </span>
-                    <div className="w-8 h-8 rounded-full bg-dark-700 border border-dark-600 overflow-hidden flex items-center justify-center text-xs font-semibold text-slate-300">
+                    <div className="w-8 h-8 rounded-xs bg-dark-800 border border-dark-600 overflow-hidden flex items-center justify-center text-xs font-semibold text-slate-300 flex-shrink-0">
                       {item.has_avatar ? (
                         <img
                           src={`http://127.0.0.1:8000${item.avatar_url}`}
@@ -185,9 +185,9 @@ export default function GlobalStatsView({ onSelectUser }) {
                 </div>
 
                 {/* Barra de progreso sutil */}
-                <div className="w-full bg-dark-800 rounded-full h-1.5 overflow-hidden">
+                <div className="w-full bg-dark-800 rounded-none h-1.5 overflow-hidden">
                   <div
-                    className="bg-indigo-500/80 h-full rounded-full transition-all duration-500"
+                    className="bg-indigo-500/80 h-full rounded-none transition-all duration-500"
                     style={{ width: `${percentOfTop}%` }}
                   />
                 </div>

@@ -9,7 +9,6 @@ import {
   Flame, 
   RotateCw, 
   Zap,
-  CheckCircle2,
   Clock
 } from 'lucide-react';
 import { toggleRecorder, toggleWatcher, triggerProcessAll } from '../api';
@@ -28,7 +27,7 @@ export default function HardwareView({ status, onRefresh }) {
 
   const gpu = hw.gpu || {};
   const gpuName = gpu.name || 'NVIDIA GeForce RTX 4070';
-  const gpuUtil = gpu.utilization_gpu_percent || 0;
+  const gpuUtil = gpu.utilization_gpu_percent ?? gpu.utilization_percent ?? 0;
   const vramUsed = gpu.vram_used_mb || 0;
   const vramTotal = gpu.vram_total_mb || 12288;
   const vramPercent = Math.round((vramUsed / (vramTotal || 1)) * 100);
@@ -111,7 +110,7 @@ export default function HardwareView({ status, onRefresh }) {
         </div>
         <button
           onClick={onRefresh}
-          className="p-2 rounded-lg bg-dark-850 hover:bg-dark-700 text-slate-400 hover:text-slate-200 border border-dark-700 transition-colors"
+          className="p-2 rounded-xs bg-dark-850 hover:bg-dark-700 text-slate-400 hover:text-slate-200 border border-dark-700 transition-colors"
           title="Actualizar métricas"
         >
           <RotateCw size={16} className={actionLoading ? "animate-spin" : ""} />
@@ -119,7 +118,7 @@ export default function HardwareView({ status, onRefresh }) {
       </div>
 
       {actionMessage && (
-        <div className="p-3 rounded-lg bg-dark-850 border border-dark-650 text-slate-300 text-xs flex items-center justify-between">
+        <div className="p-3 rounded-xs bg-dark-850 border border-dark-650 text-slate-300 text-xs flex items-center justify-between">
           <span>{actionMessage}</span>
           <button
             onClick={() => setActionMessage(null)}
@@ -133,7 +132,7 @@ export default function HardwareView({ status, onRefresh }) {
       {/* Grid de Métricas de Hardware */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* GPU Util */}
-        <div className="p-4 rounded-xl bg-dark-900 border border-dark-700 space-y-2">
+        <div className="p-4 rounded-xs bg-dark-900 border border-dark-700 space-y-2">
           <div className="flex items-center justify-between text-slate-400 text-xs">
             <span className="flex items-center space-x-1.5 font-medium">
               <Zap size={14} className="text-indigo-400" />
@@ -142,9 +141,9 @@ export default function HardwareView({ status, onRefresh }) {
             <span className="font-mono text-slate-300">{gpuUtil}%</span>
           </div>
           <div className="text-xl font-bold text-slate-100">{gpuUtil}%</div>
-          <div className="w-full bg-dark-800 rounded-full h-1.5 overflow-hidden">
+          <div className="w-full bg-dark-800 rounded-none h-1.5 overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all duration-300 ${
+              className={`h-full rounded-none transition-all duration-300 ${
                 gpuUtil > 80 ? "bg-amber-500" : "bg-indigo-500"
               }`}
               style={{ width: `${Math.min(gpuUtil, 100)}%` }}
@@ -154,7 +153,7 @@ export default function HardwareView({ status, onRefresh }) {
         </div>
 
         {/* VRAM RTX 4070 */}
-        <div className="p-4 rounded-xl bg-dark-900 border border-dark-700 space-y-2">
+        <div className="p-4 rounded-xs bg-dark-900 border border-dark-700 space-y-2">
           <div className="flex items-center justify-between text-slate-400 text-xs">
             <span className="flex items-center space-x-1.5 font-medium">
               <HardDrive size={14} className="text-cyan-400" />
@@ -165,9 +164,9 @@ export default function HardwareView({ status, onRefresh }) {
           <div className="text-xl font-bold text-slate-100">
             {Math.round(vramUsed / 1024 * 10) / 10} / {Math.round(vramTotal / 1024 * 10) / 10} GB
           </div>
-          <div className="w-full bg-dark-800 rounded-full h-1.5 overflow-hidden">
+          <div className="w-full bg-dark-800 rounded-none h-1.5 overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all duration-300 ${
+              className={`h-full rounded-none transition-all duration-300 ${
                 vramPercent > 85 ? "bg-rose-500" : "bg-cyan-500"
               }`}
               style={{ width: `${Math.min(vramPercent, 100)}%` }}
@@ -183,7 +182,7 @@ export default function HardwareView({ status, onRefresh }) {
         </div>
 
         {/* CPU */}
-        <div className="p-4 rounded-xl bg-dark-900 border border-dark-700 space-y-2">
+        <div className="p-4 rounded-xs bg-dark-900 border border-dark-700 space-y-2">
           <div className="flex items-center justify-between text-slate-400 text-xs">
             <span className="flex items-center space-x-1.5 font-medium">
               <Cpu size={14} className="text-emerald-400" />
@@ -192,9 +191,9 @@ export default function HardwareView({ status, onRefresh }) {
             <span className="font-mono text-slate-300">{cpuPercent}%</span>
           </div>
           <div className="text-xl font-bold text-slate-100">{cpuPercent}%</div>
-          <div className="w-full bg-dark-800 rounded-full h-1.5 overflow-hidden">
+          <div className="w-full bg-dark-800 rounded-none h-1.5 overflow-hidden">
             <div
-              className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+              className="h-full bg-emerald-500 rounded-none transition-all duration-300"
               style={{ width: `${Math.min(cpuPercent, 100)}%` }}
             />
           </div>
@@ -202,7 +201,7 @@ export default function HardwareView({ status, onRefresh }) {
         </div>
 
         {/* RAM */}
-        <div className="p-4 rounded-xl bg-dark-900 border border-dark-700 space-y-2">
+        <div className="p-4 rounded-xs bg-dark-900 border border-dark-700 space-y-2">
           <div className="flex items-center justify-between text-slate-400 text-xs">
             <span className="flex items-center space-x-1.5 font-medium">
               <Activity size={14} className="text-purple-400" />
@@ -213,9 +212,9 @@ export default function HardwareView({ status, onRefresh }) {
           <div className="text-xl font-bold text-slate-100">
             {ramUsed} / {ramTotal} GB
           </div>
-          <div className="w-full bg-dark-800 rounded-full h-1.5 overflow-hidden">
+          <div className="w-full bg-dark-800 rounded-none h-1.5 overflow-hidden">
             <div
-              className="h-full bg-purple-500 rounded-full transition-all duration-300"
+              className="h-full bg-purple-500 rounded-none transition-all duration-300"
               style={{ width: `${Math.min(ramPercent, 100)}%` }}
             />
           </div>
@@ -224,7 +223,7 @@ export default function HardwareView({ status, onRefresh }) {
       </div>
 
       {/* Panel de Control de Daemons */}
-      <div className="bg-dark-900 border border-dark-700 rounded-xl p-5 shadow-sm space-y-5">
+      <div className="bg-dark-900 border border-dark-700 rounded-xs p-5 shadow-sm space-y-5">
         <div className="flex items-center justify-between border-b border-dark-700/60 pb-3">
           <div>
             <h2 className="font-semibold text-slate-200 text-sm">
@@ -238,14 +237,14 @@ export default function HardwareView({ status, onRefresh }) {
             <button
               onClick={() => handleToggleBoth(true)}
               disabled={actionLoading}
-              className="px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-750 text-emerald-400 border border-dark-700 text-xs font-medium transition-colors"
+              className="px-3 py-1.5 rounded-xs bg-dark-800 hover:bg-dark-750 text-emerald-400 border border-dark-700 text-xs font-medium transition-colors"
             >
               Activar Ambos
             </button>
             <button
               onClick={() => handleToggleBoth(false)}
               disabled={actionLoading}
-              className="px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-750 text-slate-400 hover:text-rose-400 border border-dark-700 text-xs font-medium transition-colors"
+              className="px-3 py-1.5 rounded-xs bg-dark-800 hover:bg-dark-750 text-slate-400 hover:text-rose-400 border border-dark-700 text-xs font-medium transition-colors"
             >
               Pausar Ambos
             </button>
@@ -254,11 +253,11 @@ export default function HardwareView({ status, onRefresh }) {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Tarjeta Grabador Discord */}
-          <div className="p-4 rounded-xl bg-dark-850 border border-dark-700/70 flex flex-col justify-between space-y-4">
+          <div className="p-4 rounded-xs bg-dark-850 border border-dark-700 flex flex-col justify-between space-y-4">
             <div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2.5">
-                  <div className={`p-2 rounded-lg ${recorderActive ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/50' : 'bg-dark-800 text-slate-500 border border-dark-700'}`}>
+                  <div className={`p-2 rounded-xs ${recorderActive ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/50' : 'bg-dark-800 text-slate-500 border border-dark-700'}`}>
                     <Radio size={18} className={recorderActive ? "animate-pulse" : ""} />
                   </div>
                   <div>
@@ -270,7 +269,7 @@ export default function HardwareView({ status, onRefresh }) {
                     </p>
                   </div>
                 </div>
-                <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium border ${
+                <span className={`text-xs px-2.5 py-0.5 rounded-xs font-medium border ${
                   recorderActive 
                     ? 'bg-emerald-950/70 text-emerald-300 border-emerald-700/60' 
                     : 'bg-dark-800 text-slate-400 border-dark-700'
@@ -294,7 +293,7 @@ export default function HardwareView({ status, onRefresh }) {
             <button
               onClick={handleToggleRecorder}
               disabled={actionLoading}
-              className={`w-full py-2 px-3 rounded-lg text-xs font-medium transition-colors flex items-center justify-center space-x-2 border ${
+              className={`w-full py-2 px-3 rounded-xs text-xs font-medium transition-colors flex items-center justify-center space-x-2 border ${
                 recorderActive
                   ? 'bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border-rose-800/60'
                   : 'bg-dark-800 hover:bg-dark-750 text-emerald-400 border-emerald-800/50'
@@ -315,11 +314,11 @@ export default function HardwareView({ status, onRefresh }) {
           </div>
 
           {/* Tarjeta Vigilante IA */}
-          <div className="p-4 rounded-xl bg-dark-850 border border-dark-700/70 flex flex-col justify-between space-y-4">
+          <div className="p-4 rounded-xs bg-dark-850 border border-dark-700 flex flex-col justify-between space-y-4">
             <div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2.5">
-                  <div className={`p-2 rounded-lg ${watcherActive ? 'bg-cyan-950/60 text-cyan-400 border border-cyan-800/50' : 'bg-dark-800 text-slate-500 border border-dark-700'}`}>
+                  <div className={`p-2 rounded-xs ${watcherActive ? 'bg-cyan-950/60 text-cyan-400 border border-cyan-800/50' : 'bg-dark-800 text-slate-500 border border-dark-700'}`}>
                     <HardDrive size={18} />
                   </div>
                   <div>
@@ -331,7 +330,7 @@ export default function HardwareView({ status, onRefresh }) {
                     </p>
                   </div>
                 </div>
-                <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium border ${
+                <span className={`text-xs px-2.5 py-0.5 rounded-xs font-medium border ${
                   watcherActive 
                     ? 'bg-cyan-950/70 text-cyan-300 border-cyan-700/60' 
                     : 'bg-dark-800 text-slate-400 border-dark-700'
@@ -357,7 +356,7 @@ export default function HardwareView({ status, onRefresh }) {
             <button
               onClick={handleToggleWatcher}
               disabled={actionLoading}
-              className={`w-full py-2 px-3 rounded-lg text-xs font-medium transition-colors flex items-center justify-center space-x-2 border ${
+              className={`w-full py-2 px-3 rounded-xs text-xs font-medium transition-colors flex items-center justify-center space-x-2 border ${
                 watcherActive
                   ? 'bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border-rose-800/60'
                   : 'bg-dark-800 hover:bg-dark-750 text-cyan-400 border-cyan-800/50'
@@ -379,7 +378,7 @@ export default function HardwareView({ status, onRefresh }) {
         </div>
 
         {/* Sección de Disparo Manual de Procesamiento por Lote */}
-        <div className="p-4 rounded-xl bg-dark-850/80 border border-dark-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="p-4 rounded-xs bg-dark-850 border border-dark-700 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center space-x-2">
               <Clock size={16} className="text-indigo-400" />
@@ -395,7 +394,7 @@ export default function HardwareView({ status, onRefresh }) {
           <button
             onClick={handleProcessAll}
             disabled={actionLoading || isBatchRunning}
-            className={`px-4 py-2.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors flex items-center justify-center space-x-2 border ${
+            className={`px-4 py-2.5 rounded-xs text-xs font-semibold whitespace-nowrap transition-colors flex items-center justify-center space-x-2 border ${
               isBatchRunning
                 ? 'bg-indigo-950/70 border-indigo-700 text-indigo-300 cursor-not-allowed'
                 : 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-500 shadow-sm'

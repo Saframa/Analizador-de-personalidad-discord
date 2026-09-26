@@ -73,9 +73,12 @@ def is_audio_file_empty(file_path: str) -> bool:
 def is_session_active(session_dir: str, active_window_seconds: int = 45) -> bool:
     """
     Comprueba si una sesión está siendo escrita activamente en vivo por el bot de Discord.
-    Si los archivos de audio o el directorio fueron modificados hace menos de active_window_seconds,
-    se considera en vivo y NUNCA debe reconciliarse prematuramente.
+    Si existe el archivo lock .recording o si los archivos de audio/directorio fueron
+    modificados hace menos de active_window_seconds, se considera en vivo y NUNCA
+    debe reconciliarse prematuramente.
     """
+    if os.path.exists(os.path.join(session_dir, ".recording")):
+        return True
     now = time.time()
     try:
         if (now - os.path.getmtime(session_dir)) < active_window_seconds:

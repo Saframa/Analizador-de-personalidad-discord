@@ -287,11 +287,15 @@ def toggle_watcher():
             return {"status": "stopped", "message": "Vigilante de IA detenido."}
         except Exception as e:
             return {"status": "error", "message": str(e)}
-    else:
         try:
+            logs_dir = os.path.join(STORAGE_DIR, "logs")
+            os.makedirs(logs_dir, exist_ok=True)
+            log_file = open(os.path.join(logs_dir, "watcher.log"), "a", encoding="utf-8")
             subprocess.Popen(
-                [sys.executable, "main.py", "watch"],
+                [sys.executable, "-u", "main.py", "watch"],
                 cwd=BASE_DIR,
+                stdout=log_file,
+                stderr=log_file,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
             )
             return {"status": "started", "message": "Vigilante de IA iniciado en segundo plano."}

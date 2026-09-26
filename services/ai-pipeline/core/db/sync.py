@@ -22,7 +22,7 @@ def sync_all(storage_dir: str, db_path: Optional[str] = None) -> Dict[str, Any]:
 
     # Reconciliar sesiones huérfanas o interrumpidas antes de sincronizar
     try:
-        reconcile_orphan_sessions(storage_dir)
+        reconcile_orphan_sessions(storage_dir, skip_active=True)
     except Exception as e:
         logger.warning(f"Advertencia al reconciliar sesiones huérfanas: {e}")
 

@@ -241,13 +241,19 @@ REGLAS CRÍTICAS:
                 err_str = str(e).lower()
                 is_quota = any(k in err_str for k in ["429", "resource_exhausted", "quota", "rate limit", "ratelimit"])
                 if is_quota:
-                    print(f"\n🦙 [Cuota de Gemini agotada ({e}). Delegando inmediatamente a LLaMA (Groq LLaMA 3.3)]...")
+                    try:
+                        print(f"\n🦙 [Cuota de Gemini agotada ({e}). Delegando inmediatamente a LLaMA (Groq LLaMA 3.3)]...")
+                    except Exception:
+                        pass
                     if self.llama_client and self.llama_client.is_available():
                         try:
                             return self._llama_evaluation(transcript, target_user_id, target_username, metrics, threads)
                         except Exception as llama_err:
                             logger.warning(f"Fallo en evaluación con LLaMA ({llama_err}).")
-                    print("   Usando análisis heurístico de respaldo.")
+                    try:
+                        print("   Usando análisis heurístico de respaldo.")
+                    except Exception:
+                        pass
                     return self._mock_evaluation(transcript, target_user_id, target_username, metrics)
 
                 if attempt < max_retries - 1:

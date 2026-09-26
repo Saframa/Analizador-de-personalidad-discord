@@ -24,6 +24,33 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 import zipfile
 
+# Desactivar telemetría de wandb para evitar captura de consola inestable en Windows
+os.environ["WANDB_MODE"] = "disabled"
+os.environ["WANDB_SILENT"] = "true"
+
+# En Windows, evitar que subprocess sin consola lance OSError [Errno 22] al hacer print()
+class SafeStream:
+    def __init__(self, stream):
+        self._stream = stream
+    def write(self, s):
+        try:
+            return self._stream.write(s)
+        except Exception:
+            return len(s)
+    def flush(self):
+        try:
+            return self._stream.flush()
+        except Exception:
+            pass
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
+if sys.platform == "win32":
+    if sys.stdout is not None:
+        sys.stdout = SafeStream(sys.stdout)
+    if sys.stderr is not None:
+        sys.stderr = SafeStream(sys.stderr)
+
 # Asegurar importación de core
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 if CURRENT_DIR not in sys.path:
@@ -475,44 +502,50 @@ def profile_session(
         updated_profiles.append(profile)
 
         # 4. Reporte amigable en consola
-        bf = profile.big_five
-        print(f"      [OK] Perfil sintetizado (Sesión #{profile.total_sessions_analyzed}, {profile.total_speaking_seconds:.1f}s acumulados):")
-        print(f"         - Rol en el grupo: {profile.group_role.primary_role}")
-        print(f"         - Humor y estilo:  {profile.communication_style.humor_type}")
-        if profile.social_dynamics.closest_friends or profile.social_dynamics.teasing_targets:
-            c_str = ", ".join(profile.social_dynamics.closest_friends) or "Ninguno aún"
-            t_str = ", ".join(profile.social_dynamics.teasing_targets) or "Ninguno aún"
-            print(f"         - Dinámica social: Afinidad con: [{c_str}] | Chicanas a: [{t_str}]")
-        if profile.group_lore.inside_jokes:
-            print(f"         - Lore / Jokes:    {'; '.join(profile.group_lore.inside_jokes[:3])}")
-        if profile.emotional_triggers.tilts or profile.emotional_triggers.hyperfocus_topics:
-            tilts_s = ", ".join(profile.emotional_triggers.tilts[:2]) or "N/A"
-            hyper_s = ", ".join(profile.emotional_triggers.hyperfocus_topics[:2]) or "N/A"
-            print(f"         - Disparadores:    Tilts: [{tilts_s}] | Hiperfocos: [{hyper_s}]")
-        if profile.temporal_patterns.peak_hours:
-            print(f"         - Cronotipo:       {profile.temporal_patterns.cronotype} ({', '.join(profile.temporal_patterns.peak_hours)})")
-        if profile.dialect_markers.vocabulary_frequencies:
-            top_w = list(profile.dialect_markers.vocabulary_frequencies.items())[:6]
-            w_str = ", ".join([f"{w} (x{c})" for w, c in top_w])
-            print(f"         - Idiolecto Top:   {w_str}")
-        print(f"         - Big Five:")
-        print(f"           • Apertura:        {bf.openness.score:.2f} (confianza: {bf.openness.confidence:.2f})")
-        print(f"           • Responsabilidad: {bf.conscientiousness.score:.2f} (confianza: {bf.conscientiousness.confidence:.2f})")
-        print(f"           • Extraversión:    {bf.extraversion.score:.2f} (confianza: {bf.extraversion.confidence:.2f})")
-        print(f"           • Amabilidad:      {bf.agreeableness.score:.2f} (confianza: {bf.agreeableness.confidence:.2f})")
-        print(f"           • Neuroticismo:    {bf.neuroticism.score:.2f} (confianza: {bf.neuroticism.confidence:.2f})")
-        print(f"         - Jerga rioplatense: {', '.join(profile.dialect_markers.favorite_slang) or 'ninguna'}")
-        sample_cite = bf.openness.evidence_quotes[0].quote if bf.openness.evidence_quotes else 'N/A'
-        print(f"         - Cita de evidencia: \"{sample_cite}\"")
-        print(f"         - Guardado en: storage/profiles/{user_id}/profile.json")
+        try:
+            bf = profile.big_five
+            print(f"      [OK] Perfil sintetizado (Sesión #{profile.total_sessions_analyzed}, {profile.total_speaking_seconds:.1f}s acumulados):")
+            print(f"         - Rol en el grupo: {profile.group_role.primary_role}")
+            print(f"         - Humor y estilo:  {profile.communication_style.humor_type}")
+            if profile.social_dynamics.closest_friends or profile.social_dynamics.teasing_targets:
+                c_str = ", ".join(profile.social_dynamics.closest_friends) or "Ninguno aún"
+                t_str = ", ".join(profile.social_dynamics.teasing_targets) or "Ninguno aún"
+                print(f"         - Dinámica social: Afinidad con: [{c_str}] | Chicanas a: [{t_str}]")
+            if profile.group_lore.inside_jokes:
+                print(f"         - Lore / Jokes:    {'; '.join(profile.group_lore.inside_jokes[:3])}")
+            if profile.emotional_triggers.tilts or profile.emotional_triggers.hyperfocus_topics:
+                tilts_s = ", ".join(profile.emotional_triggers.tilts[:2]) or "N/A"
+                hyper_s = ", ".join(profile.emotional_triggers.hyperfocus_topics[:2]) or "N/A"
+                print(f"         - Disparadores:    Tilts: [{tilts_s}] | Hiperfocos: [{hyper_s}]")
+            if profile.temporal_patterns.peak_hours:
+                print(f"         - Cronotipo:       {profile.temporal_patterns.cronotype} ({', '.join(profile.temporal_patterns.peak_hours)})")
+            if profile.dialect_markers.vocabulary_frequencies:
+                top_w = list(profile.dialect_markers.vocabulary_frequencies.items())[:6]
+                w_str = ", ".join([f"{w} (x{c})" for w, c in top_w])
+                print(f"         - Idiolecto Top:   {w_str}")
+            print(f"         - Big Five:")
+            print(f"           • Apertura:        {bf.openness.score:.2f} (confianza: {bf.openness.confidence:.2f})")
+            print(f"           • Responsabilidad: {bf.conscientiousness.score:.2f} (confianza: {bf.conscientiousness.confidence:.2f})")
+            print(f"           • Extraversión:    {bf.extraversion.score:.2f} (confianza: {bf.extraversion.confidence:.2f})")
+            print(f"           • Amabilidad:      {bf.agreeableness.score:.2f} (confianza: {bf.agreeableness.confidence:.2f})")
+            print(f"           • Neuroticismo:    {bf.neuroticism.score:.2f} (confianza: {bf.neuroticism.confidence:.2f})")
+            print(f"         - Jerga rioplatense: {', '.join(profile.dialect_markers.favorite_slang) or 'ninguna'}")
+            sample_cite = bf.openness.evidence_quotes[0].quote if bf.openness.evidence_quotes else 'N/A'
+            print(f"         - Cita de evidencia: \"{sample_cite}\"")
+            print(f"         - Guardado en: storage/profiles/{user_id}/profile.json")
+        except Exception:
+            pass
 
     # Limpieza automática del audio raw para ahorrar espacio si está habilitado
     if cleanup_audio:
         cleanup_session_audio(session_dir)
 
-    print("\n" + "=" * 65)
-    print("🎉 PERFILADO COMPLETADO CON EXITO")
-    print("=" * 65)
+    try:
+        print("\n" + "=" * 65)
+        print("🎉 PERFILADO COMPLETADO CON EXITO")
+        print("=" * 65)
+    except Exception:
+        pass
     return updated_profiles
 
 

@@ -211,21 +211,35 @@ def get_system_status():
 
 @app.post("/api/daemon/recorder/toggle")
 def toggle_recorder():
-    """Inicia o detiene el proceso grabador de Discord."""
+    """Inicia o detiene el proceso grabador de Discord de forma limpia."""
     status = get_daemons_status()["recorder"]
     if status["active"]:
+        stop_file = os.path.join(STORAGE_DIR, ".recorder_stop")
         try:
+            with open(stop_file, "w", encoding="utf-8") as f:
+                f.write("stop")
             p = psutil.Process(status["pid"])
-            for child in p.children(recursive=True):
-                try:
-                    child.terminate()
-                except Exception:
-                    pass
-            p.terminate()
-            p.wait(timeout=5)
-            return {"status": "stopped", "message": "Grabador de Discord pausado/detenido."}
+            # Esperar hasta 4s a que el bot cierre streams de audio y notifique a Discord
+            try:
+                p.wait(timeout=4)
+            except psutil.TimeoutExpired:
+                # Si excede el tiempo, forzar detención de seguridad
+                for child in p.children(recursive=True):
+                    try:
+                        child.terminate()
+                    except Exception:
+                        pass
+                p.terminate()
+                p.wait(timeout=2)
+            return {"status": "stopped", "message": "Grabador de Discord desconectado y detenido limpiamente."}
         except Exception as e:
             return {"status": "error", "message": str(e)}
+        finally:
+            if os.path.exists(stop_file):
+                try:
+                    os.remove(stop_file)
+                except Exception:
+                    pass
     else:
         # Iniciar grabador
         recorder_dir = os.path.abspath(os.path.join(ROOT_DIR, "services", "voice-recorder"))
@@ -233,12 +247,17 @@ def toggle_recorder():
         if not os.path.exists(entrypoint):
             raise HTTPException(status_code=500, detail="dist/src/index.js no existe. Compila con npm run build.")
         try:
+            log_path = os.path.join(STORAGE_DIR, "recorder.log")
+            log_file = open(log_path, "a", encoding="utf-8")
             node_bin = shutil.which("node") or "node"
             proc = subprocess.Popen(
                 [node_bin, os.path.join("dist", "src", "index.js")],
                 cwd=recorder_dir,
+                stdout=log_file,
+                stderr=log_file,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
             )
+            time.sleep(0.5)
             return {"status": "started", "message": f"Grabador de Discord iniciado (PID {proc.pid})."}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))

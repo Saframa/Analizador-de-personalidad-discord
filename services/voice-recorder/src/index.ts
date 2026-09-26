@@ -1,4 +1,6 @@
-import { Client, GatewayIntentBits, Events } from 'discord.js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { Client, GatewayIntentBits, Events, ActivityType } from 'discord.js';
 import { config } from './config.js';
 import { SessionManager } from './session/sessionManager.js';
 import { PresenceWatcher } from './listeners/presenceWatcher.js';
@@ -30,14 +32,44 @@ client.once(Events.ClientReady, async (readyClient) => {
   console.log(`⏱️  Rotación de bloques continuos: cada ${config.ROTATION_INTERVAL_MINUTES} minutos (Rolling Sessions)`);
   console.log(`📁 Directorio de almacenamiento: ${config.STORAGE_DIR}`);
 
+  // Asegurar estado 'online' verde en Discord para evitar indicador amarillo de inactividad
+  client.user?.setPresence({
+    status: 'online',
+    activities: [{ name: 'grabando llamadas', type: ActivityType.Custom }],
+  });
+
+  // Limpiar cualquier estado residual que haya quedado en Discord antes de escanear
+  await presenceWatcher.cleanupStaleVoiceStates();
+
   // Escanear si ya hay canales con gente hablando al momento de iniciar
   await presenceWatcher.scanInitialChannels();
 });
 
-// Manejo de cierre elegante (Ctrl+C / SIGINT / SIGTERM)
+// Vigilante de archivo de parada suave (.recorder_stop) para Windows y control por API
+const stopFilePath = path.join(config.STORAGE_DIR, '.recorder_stop');
+if (fs.existsSync(stopFilePath)) {
+  try {
+    fs.unlinkSync(stopFilePath);
+  } catch {}
+}
+
+const stopWatcherInterval = setInterval(async () => {
+  if (fs.existsSync(stopFilePath)) {
+    clearInterval(stopWatcherInterval);
+    try {
+      fs.unlinkSync(stopFilePath);
+    } catch {}
+    console.log('🛑 [VoiceRecorder] Señal de parada (.recorder_stop) recibida. Apagando limpiamente...');
+    await handleShutdown('API_STOP');
+  }
+}, 300);
+
+// Manejo de cierre elegante (Ctrl+C / SIGINT / SIGTERM / API_STOP)
 const handleShutdown = async (signal: string) => {
   console.log(`\n🛑 Recibida señal ${signal}. Finalizando grabaciones activas de forma segura...`);
   try {
+    presenceWatcher.setShuttingDown();
+    client.removeAllListeners(Events.VoiceStateUpdate);
     await presenceWatcher.cleanupAndEndSession();
     client.destroy();
     console.log('👋 Servicio detenido correctamente.');

@@ -21,6 +21,8 @@ export class PresenceWatcher {
   private currentChannelId: string | null = null;
   private leaveTimeout: NodeJS.Timeout | null = null;
   private isConnecting = false;
+  private isShuttingDown = false;
+  private lastJoinAttempt = 0;
 
   constructor(client: Client, sessionManager: SessionManager) {
     this.client = client;
@@ -28,10 +30,35 @@ export class PresenceWatcher {
     this.setupListeners();
   }
 
+  public setShuttingDown(): void {
+    this.isShuttingDown = true;
+    this.cancelLeaveTimeout();
+  }
+
   private setupListeners(): void {
     this.client.on(Events.VoiceStateUpdate, (oldState: VoiceState, newState: VoiceState) => {
       this.handleVoiceStateUpdate(oldState, newState);
     });
+  }
+
+  /**
+   * Limpia conexiones de voz fantasma que hayan quedado registradas en Discord
+   * tras un cierre abrupto o reinicio del bot.
+   */
+  public async cleanupStaleVoiceStates(): Promise<void> {
+    for (const guild of this.client.guilds.cache.values()) {
+      if (config.GUILD_ID && guild.id !== config.GUILD_ID) continue;
+      const me = guild.members.me;
+      if (me?.voice.channelId) {
+        console.log(`🧹 [PresenceWatcher] Estado de voz previo detectado en '${me.voice.channel?.name ?? me.voice.channelId}'. Forzando desconexión limpia...`);
+        try {
+          await me.voice.disconnect();
+          await new Promise((resolve) => setTimeout(resolve, 800));
+        } catch (err) {
+          console.warn(`Aviso al limpiar voz previa:`, err);
+        }
+      }
+    }
   }
 
   /**
@@ -58,6 +85,10 @@ export class PresenceWatcher {
    * Procesa cualquier cambio en canales de voz dentro del servidor.
    */
   private async handleVoiceStateUpdate(oldState: VoiceState, newState: VoiceState): Promise<void> {
+    if (this.isShuttingDown) {
+      return;
+    }
+
     const channel = newState.channel ?? oldState.channel;
     if (!channel || channel.type !== ChannelType.GuildVoice) {
       return;
@@ -78,9 +109,18 @@ export class PresenceWatcher {
       return;
     }
 
-    // Verificar si el bot ya está conectado en este canal
+    // Verificar si el bot ya está conectado con conexión activa en este canal
     const botVoiceChannelId = channel.guild.members.me?.voice.channelId;
-    const isConnectedHere = botVoiceChannelId === channel.id;
+    const isConnectedHere = botVoiceChannelId === channel.id && this.currentConnection !== null;
+
+    // Si Discord cree que estamos en el canal pero no tenemos conexión de audio activa (estado fantasma)
+    if (botVoiceChannelId === channel.id && !this.currentConnection && !this.isConnecting) {
+      console.warn(`⚠️ [PresenceWatcher] Estado fantasma detectado en '${channel.name}'. Limpiando para reconexión limpia...`);
+      try {
+        await channel.guild.members.me?.voice.disconnect();
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      } catch {}
+    }
 
     // Contar usuarios humanos en el canal relevante
     const humanCount = channel.members.filter((m) => !m.user.bot).size;
@@ -124,9 +164,16 @@ export class PresenceWatcher {
    * Conecta el bot al canal de voz e inicializa la sesión.
    */
   private async joinAndStartRecording(channel: VoiceBasedChannel): Promise<void> {
-    if (this.isConnecting || this.sessionManager.isRecording()) {
+    if (this.isShuttingDown || this.isConnecting || this.sessionManager.isRecording()) {
       return;
     }
+
+    const now = Date.now();
+    if (now - this.lastJoinAttempt < 3000) {
+      console.log(`⏳ [PresenceWatcher] Intervalo de seguridad activo. Esperando antes de reconectar a '${channel.name}'...`);
+      return;
+    }
+    this.lastJoinAttempt = now;
 
     this.isConnecting = true;
 
@@ -143,8 +190,26 @@ export class PresenceWatcher {
         debug: true,
       });
 
-      connection.on('stateChange', (oldState, newState) => {
+      connection.on('stateChange', async (oldState, newState) => {
         console.log(`📡 [VoiceConnection] ${channel.name}: ${oldState.status} -> ${newState.status}`, (newState as any).reason ?? '', (newState as any).closeCode ?? '');
+        
+        if (newState.status === VoiceConnectionStatus.Disconnected) {
+          const closeCode = (newState as any).closeCode;
+          if (closeCode === 4014 || closeCode === 4006) {
+            console.log(`ℹ️ [VoiceConnection] Desconexión definitiva detectada (código ${closeCode}). Finalizando sesión...`);
+            await this.cleanupAndEndSession();
+          } else {
+            try {
+              await Promise.race([
+                entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
+                entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
+              ]);
+            } catch {
+              console.warn('⚠️ [VoiceConnection] No se pudo recuperar el socket de voz. Finalizando sesión...');
+              await this.cleanupAndEndSession();
+            }
+          }
+        }
       });
 
       connection.on('debug', (msg) => {
@@ -164,19 +229,6 @@ export class PresenceWatcher {
 
       // Iniciar la sesión de grabación y demultiplexación
       await this.sessionManager.startSession(channel, connection);
-
-      // Manejar desconexiones del socket de voz
-      connection.on(VoiceConnectionStatus.Disconnected, async () => {
-        try {
-          await Promise.race([
-            entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
-            entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
-          ]);
-        } catch {
-          console.warn('⚠️ [PresenceWatcher] Desconexión de voz detectada.');
-          await this.cleanupAndEndSession();
-        }
-      });
     } catch (err) {
       console.error(`❌ [PresenceWatcher] Error al conectar al canal '${channel.name}':`, err);
       await this.cleanupAndEndSession();
@@ -227,6 +279,17 @@ export class PresenceWatcher {
       }
       this.currentConnection = null;
       this.currentChannelId = null;
+    }
+
+    // Asegurar desconexión explícita de todos los canales de voz en Discord Gateway
+    for (const guild of this.client.guilds.cache.values()) {
+      if (guild.members.me?.voice.channelId) {
+        try {
+          await guild.members.me.voice.disconnect();
+        } catch (e) {
+          // Ignorar si ya estaba desconectado
+        }
+      }
     }
   }
 }

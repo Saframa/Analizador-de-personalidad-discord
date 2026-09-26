@@ -25,6 +25,9 @@ export class PresenceWatcher {
   private leaveTimeout: NodeJS.Timeout | null = null;
   private isConnecting = false;
   private isShuttingDown = false;
+  private isManualOperation = false;
+  private isManualConnected = false;
+  private autoJoinPausedUntil = 0;
   private lastJoinAttempt = 0;
 
   constructor(client: Client, sessionManager: SessionManager) {
@@ -98,7 +101,7 @@ export class PresenceWatcher {
    * Procesa cualquier cambio en canales de voz dentro del servidor.
    */
   private async handleVoiceStateUpdate(oldState: VoiceState, newState: VoiceState): Promise<void> {
-    if (this.isShuttingDown) {
+    if (this.isShuttingDown || this.isManualOperation) {
       return;
     }
 
@@ -115,9 +118,9 @@ export class PresenceWatcher {
     const member = newState.member ?? oldState.member;
     const isBotSelf = member?.id === this.client.user?.id;
 
-    // Si el bot fue desconectado externamente
+    // Si el bot fue desconectado externamente (ej. kick manual en Discord)
     if (isBotSelf && !newState.channelId && this.sessionManager.isRecording()) {
-      console.warn('⚠️ [PresenceWatcher] El bot fue desconectado del canal de voz. Finalizando sesión...');
+      console.warn('⚠️ [PresenceWatcher] El bot fue desconectado externamente del canal de voz. Finalizando sesión...');
       await this.cleanupAndEndSession();
       return;
     }
@@ -138,16 +141,22 @@ export class PresenceWatcher {
     // Contar usuarios humanos en el canal relevante
     const humanCount = channel.members.filter((m) => !m.user.bot).size;
 
+    // Si estábamos en modo manual y ya se unieron usuarios suficientes, transferir a modo automático
+    if (isConnectedHere && this.isManualConnected && humanCount >= config.MIN_USERS_TO_RECORD) {
+      this.isManualConnected = false;
+    }
+
     // REGLA 1: Entrada automática (>= MIN_USERS_TO_RECORD en cualquier canal)
-    // Protegido con mutex `isConnecting` y comprobación de canal actual
+    const autoJoinBlocked = Date.now() < this.autoJoinPausedUntil;
     if (
       humanCount >= config.MIN_USERS_TO_RECORD &&
       !this.sessionManager.isRecording() &&
       !this.isConnecting &&
-      !isConnectedHere
+      !isConnectedHere &&
+      !autoJoinBlocked
     ) {
       this.cancelLeaveTimeout();
-      await this.joinAndStartRecording(channel);
+      await this.joinAndStartRecording(channel, false);
       return;
     }
 
@@ -165,7 +174,8 @@ export class PresenceWatcher {
     // REGLA 3: Desconexión automática con Debounce (< MIN_USERS_TO_RECORD en canal activo)
     if (isConnectedHere && this.sessionManager.isRecording()) {
       if (humanCount < config.MIN_USERS_TO_RECORD) {
-        this.scheduleGracefulLeave(channel.name);
+        const graceSeconds = this.isManualConnected ? 120 : config.DEBOUNCE_LEAVE_SECONDS;
+        this.scheduleGracefulLeave(channel.name, graceSeconds);
       } else {
         // Si hay suficientes personas, cancelar cualquier salida pendiente
         this.cancelLeaveTimeout();
@@ -176,25 +186,35 @@ export class PresenceWatcher {
   /**
    * Conecta el bot al canal de voz e inicializa la sesión.
    */
-  private async joinAndStartRecording(channel: VoiceBasedChannel): Promise<void> {
-    if (this.isShuttingDown || this.isConnecting || this.sessionManager.isRecording()) {
-      return;
+  private async joinAndStartRecording(channel: VoiceBasedChannel, isManual: boolean = false): Promise<boolean> {
+    if (this.isShuttingDown) {
+      return false;
+    }
+
+    if (this.isConnecting) {
+      console.warn(`⏳ [PresenceWatcher] Ya hay una conexión en proceso para un canal.`);
+      return false;
+    }
+
+    if (this.sessionManager.isRecording() && this.currentChannelId === channel.id) {
+      console.log(`ℹ️ [PresenceWatcher] Ya está grabando activamente en '${channel.name}'.`);
+      return true;
     }
 
     const now = Date.now();
-    if (now - this.lastJoinAttempt < 3000) {
+    if (!isManual && (now - this.lastJoinAttempt < 3000)) {
       console.log(`⏳ [PresenceWatcher] Intervalo de seguridad activo. Esperando antes de reconectar a '${channel.name}'...`);
-      return;
+      return false;
     }
     this.lastJoinAttempt = now;
-
     this.isConnecting = true;
 
+    let connection: VoiceConnection | null = null;
     try {
       const humanCount = channel.members.filter((m) => !m.user.bot).size;
-      console.log(`🚀 [PresenceWatcher] Detectados ${humanCount} usuarios en '${channel.name}'. Conectando bot...`);
+      console.log(`🚀 [PresenceWatcher] Conectando bot a '${channel.name}' (${humanCount} usuarios humanos)...`);
 
-      const connection = joinVoiceChannel({
+      connection = joinVoiceChannel({
         channelId: channel.id,
         guildId: channel.guild.id,
         adapterCreator: channel.guild.voiceAdapterCreator,
@@ -206,6 +226,11 @@ export class PresenceWatcher {
       connection.on('stateChange', async (oldState, newState) => {
         console.log(`📡 [VoiceConnection] ${channel.name}: ${oldState.status} -> ${newState.status}`, (newState as any).reason ?? '', (newState as any).closeCode ?? '');
         
+        // Si estamos ejecutando una transición manual, ignorar desconexiones previas
+        if (this.isManualOperation) {
+          return;
+        }
+
         if (newState.status === VoiceConnectionStatus.Disconnected) {
           const closeCode = (newState as any).closeCode;
           if (closeCode === 4014 || closeCode === 4006) {
@@ -214,8 +239,8 @@ export class PresenceWatcher {
           } else {
             try {
               await Promise.race([
-                entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
-                entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
+                entersState(connection!, VoiceConnectionStatus.Signalling, 5_000),
+                entersState(connection!, VoiceConnectionStatus.Connecting, 5_000),
               ]);
             } catch {
               console.warn('⚠️ [VoiceConnection] No se pudo recuperar el socket de voz. Finalizando sesión...');
@@ -234,17 +259,24 @@ export class PresenceWatcher {
       });
 
       // Esperar a que la conexión esté en estado Ready
-      await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+      await entersState(connection!, VoiceConnectionStatus.Ready, 20_000);
       console.log(`🔗 [PresenceWatcher] Conexión de voz establecida con éxito en '${channel.name}'.`);
 
       this.currentConnection = connection;
       this.currentChannelId = channel.id;
+      this.isManualConnected = isManual;
 
       // Iniciar la sesión de grabación y demultiplexación
-      await this.sessionManager.startSession(channel, connection);
+      await this.sessionManager.startSession(channel, connection!);
+      return true;
     } catch (err) {
       console.error(`❌ [PresenceWatcher] Error al conectar al canal '${channel.name}':`, err);
+      try {
+        connection?.removeAllListeners();
+        connection?.destroy();
+      } catch {}
       await this.cleanupAndEndSession();
+      return false;
     } finally {
       this.isConnecting = false;
     }
@@ -253,22 +285,23 @@ export class PresenceWatcher {
   /**
    * Programa la desconexión con tiempo de gracia (debounce).
    */
-  private scheduleGracefulLeave(channelName: string): void {
+  private scheduleGracefulLeave(channelName: string, seconds: number = config.DEBOUNCE_LEAVE_SECONDS): void {
     if (this.leaveTimeout) {
       return;
     }
 
-    console.log(`⏳ [PresenceWatcher] Menos de ${config.MIN_USERS_TO_RECORD} usuarios en '${channelName}'. Iniciando cuenta regresiva de ${config.DEBOUNCE_LEAVE_SECONDS}s para salir...`);
+    console.log(`⏳ [PresenceWatcher] Menos de ${config.MIN_USERS_TO_RECORD} usuarios en '${channelName}'. Esperando ${seconds}s antes de desconectar...`);
 
     this.leaveTimeout = setTimeout(async () => {
       console.log(`🚪 [PresenceWatcher] Tiempo de gracia finalizado. Saliendo de '${channelName}'...`);
       await this.cleanupAndEndSession();
-    }, config.DEBOUNCE_LEAVE_SECONDS * 1000);
+      this.saveChannelsCache();
+    }, seconds * 1000);
   }
 
   private cancelLeaveTimeout(): void {
     if (this.leaveTimeout) {
-      console.log('🔄 [PresenceWatcher] Se reincorporaron usuarios al canal. Salida cancelada.');
+      console.log('🔄 [PresenceWatcher] Se canceló el tiempo de salida.');
       clearTimeout(this.leaveTimeout);
       this.leaveTimeout = null;
     }
@@ -279,6 +312,7 @@ export class PresenceWatcher {
    */
   public async cleanupAndEndSession(): Promise<void> {
     this.cancelLeaveTimeout();
+    this.isManualConnected = false;
 
     if (this.sessionManager.isRecording()) {
       await this.sessionManager.endSession();
@@ -286,6 +320,7 @@ export class PresenceWatcher {
 
     if (this.currentConnection) {
       try {
+        this.currentConnection.removeAllListeners();
         this.currentConnection.destroy();
       } catch (e) {
         // Ignorar si ya estaba destruida
@@ -468,21 +503,65 @@ export class PresenceWatcher {
       return { success: true, message: `El bot ya se encuentra grabando en '${targetChannel.name}'.` };
     }
 
-    // Si ya estamos en otro canal, desconectar limpiamente antes
-    if (this.sessionManager.isRecording() || this.currentConnection) {
-      console.log(`🔄 [PresenceWatcher] Desconectando canal anterior para unir manualmente a '${targetChannel.name}'...`);
-      await this.cleanupAndEndSession();
-      await new Promise((r) => setTimeout(r, 600));
-    }
-
+    console.log(`🎯 [PresenceWatcher] Transición manual hacia '${targetChannel.name}' iniciada...`);
+    this.isManualOperation = true;
     this.cancelLeaveTimeout();
-    await this.joinAndStartRecording(targetChannel);
-    this.saveChannelsCache();
 
-    return {
-      success: true,
-      message: `Bot conectado exitosamente al canal de voz '${targetChannel.name}'. Grabación iniciada.`,
-    };
+    // Pausar auto-join por 25s para que no interfiera ningún evento de presencia
+    this.autoJoinPausedUntil = Date.now() + 25000;
+
+    try {
+      // 1. Si ya estamos en otro canal, desconectar y cerrar sesión limpiamente
+      if (this.sessionManager.isRecording()) {
+        console.log(`⏹️ [PresenceWatcher] Cerrando sesión previa antes de mover bot...`);
+        await this.sessionManager.endSession();
+      }
+
+      if (this.currentConnection) {
+        console.log(`🔌 [PresenceWatcher] Destruyendo conexión anterior...`);
+        try {
+          this.currentConnection.removeAllListeners();
+          this.currentConnection.destroy();
+        } catch {}
+        this.currentConnection = null;
+        this.currentChannelId = null;
+      }
+
+      // Desconexión limpia del socket de Discord si quedó asociado
+      for (const guild of this.client.guilds.cache.values()) {
+        if (guild.members.me?.voice.channelId) {
+          try {
+            await guild.members.me.voice.disconnect();
+          } catch {}
+        }
+      }
+
+      // Pausa breve para que Discord Gateway procese la salida del canal previo
+      await new Promise((r) => setTimeout(r, 700));
+
+      // 2. Conectar al nuevo canal forzando bypass de throttle
+      const connected = await this.joinAndStartRecording(targetChannel, true);
+      if (!connected) {
+        return {
+          success: false,
+          message: `No se pudo conectar a '${targetChannel.name}'. Verifica permisos o estado del canal.`,
+        };
+      }
+
+      this.saveChannelsCache();
+      return {
+        success: true,
+        message: `Bot conectado exitosamente al canal '${targetChannel.name}'. Grabación iniciada.`,
+      };
+    } catch (err: any) {
+      console.error(`❌ [PresenceWatcher] Error en manualJoin:`, err);
+      return {
+        success: false,
+        message: `Fallo al unir al canal: ${err?.message || err}`,
+      };
+    } finally {
+      this.isManualOperation = false;
+    }
   }
 
   /**
@@ -494,12 +573,20 @@ export class PresenceWatcher {
     }
 
     console.log(`👋 [PresenceWatcher] Desconexión manual solicitada.`);
-    await this.cleanupAndEndSession();
-    this.saveChannelsCache();
+    this.isManualOperation = true;
+    // Pausar auto-join por 45s para que no se reconecte inmediatamente al mismo canal
+    this.autoJoinPausedUntil = Date.now() + 45000;
+    this.cancelLeaveTimeout();
 
-    return {
-      success: true,
-      message: 'Bot desconectado correctamente del canal de voz.',
-    };
+    try {
+      await this.cleanupAndEndSession();
+      this.saveChannelsCache();
+      return {
+        success: true,
+        message: 'Bot desconectado correctamente del canal de voz. Escucha automática pausada temporalmente.',
+      };
+    } finally {
+      this.isManualOperation = false;
+    }
   }
 }

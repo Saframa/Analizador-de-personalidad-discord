@@ -157,3 +157,87 @@ class VoiceCurator:
             "segments_used": len(extracted_chunks),
             "target_lufs": self.target_lufs,
         }
+
+    def generate_prompt_and_transcripts(
+        self,
+        user_id: str,
+        output_dir: str,
+        transcriber=None,
+    ) -> Dict[str, str]:
+        """
+        Genera la transcripción de sample_clean_60s.wav y crea sample_clean_prompt.wav (5-12s)
+        con su transcripción correspondiente para optimizar la síntesis F5-TTS.
+        """
+        user_sample_dir = os.path.join(output_dir, user_id)
+        wav_60s = os.path.join(user_sample_dir, "sample_clean_60s.wav")
+        txt_60s = os.path.join(user_sample_dir, "sample_clean_60s.txt")
+        wav_prompt = os.path.join(user_sample_dir, "sample_clean_prompt.wav")
+        txt_prompt = os.path.join(user_sample_dir, "sample_clean_prompt.txt")
+
+        if not os.path.exists(wav_60s):
+            return {}
+
+        results = {}
+        if transcriber is None:
+            try:
+                from core.stt.transcriber import WhisperTranscriber
+                transcriber = WhisperTranscriber(model_size="base")
+            except Exception:
+                pass
+
+        full_text = ""
+        segs = []
+        if transcriber is not None:
+            try:
+                segs = transcriber.transcribe_file(wav_60s)
+                full_text = " ".join(s["text"].strip() for s in segs if s.get("text")).strip()
+            except Exception:
+                pass
+
+        if full_text and (not os.path.exists(txt_60s) or os.path.getsize(txt_60s) == 0):
+            with open(txt_60s, "w", encoding="utf-8") as f:
+                f.write(full_text)
+            results["txt_60s"] = txt_60s
+
+        if not os.path.exists(wav_prompt) or not os.path.exists(txt_prompt):
+            try:
+                data, sr = sf.read(wav_60s)
+                best_start = 0.0
+                best_end = min(8.0, len(data) / sr)
+                prompt_text = ""
+
+                # 1. Buscar un segmento único autocontenido de 4.5s a 10.0s con buena densidad de habla
+                if segs:
+                    for s in segs:
+                        dur = s["end"] - s["start"]
+                        text_words = len(s.get("text", "").strip().split())
+                        if 4.5 <= dur <= 10.0 and text_words >= 6:
+                            best_start = s["start"]
+                            best_end = s["end"]
+                            prompt_text = s["text"].strip()
+                            break
+
+                    # 2. Si no hay un solo segmento, acumular desde el inicio hasta alcanzar 5 a 9s en límite de oración
+                    if not prompt_text:
+                        for s in segs:
+                            if s["end"] >= 5.0:
+                                best_end = min(s["end"], 10.0)
+                                prompt_text = " ".join(item["text"].strip() for item in segs if item["end"] <= best_end + 0.1).strip()
+                                break
+
+                if not prompt_text and full_text:
+                    prompt_text = full_text[:120]
+
+                s_sample = int(best_start * sr)
+                e_sample = min(len(data), int(best_end * sr))
+                prompt_data = data[s_sample:e_sample]
+
+                sf.write(wav_prompt, prompt_data, sr, subtype="PCM_16")
+                with open(txt_prompt, "w", encoding="utf-8") as f:
+                    f.write(prompt_text or full_text or "Hola, buenas.")
+                results["wav_prompt"] = wav_prompt
+                results["txt_prompt"] = txt_prompt
+            except Exception:
+                pass
+
+        return results

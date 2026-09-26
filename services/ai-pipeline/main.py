@@ -336,6 +336,14 @@ def process_session(
                     f"      [OK] {participant.display_name}: {res['duration_seconds']}s guardados en "
                     f"storage/clean_samples/{user_id}/sample_clean_60s.wav"
                 )
+                try:
+                    curator.generate_prompt_and_transcripts(
+                        user_id=user_id,
+                        output_dir=clean_samples_dir,
+                        transcriber=transcriber,
+                    )
+                except Exception as e:
+                    logger.warning(f"Error generando prompt y transcripción para {user_id}: {e}")
             else:
                 print(f"      • {participant.display_name}: Audio limpio insuficiente (< 3s).")
 
@@ -1106,6 +1114,37 @@ def main():
         help="Ruta base del directorio de almacenamiento",
     )
 
+    # Subcomando: process-all (atajo directo para procesar todas las sesiones)
+    process_all_parser = subparsers.add_parser("process-all", help="Procesa, transcribe y perfila en lote TODAS las sesiones grabadas acumuladas")
+    process_all_parser.add_argument(
+        "--model-size",
+        type=str,
+        default="medium",
+        choices=["tiny", "base", "small", "medium", "large-v3", "turbo"],
+        help="Tamaño del modelo faster-whisper (por defecto: medium)",
+    )
+    process_all_parser.add_argument(
+        "--no-clean-samples",
+        action="store_true",
+        help="Omite la extracción de muestras limpias para clonación de voz",
+    )
+    process_all_parser.add_argument(
+        "--no-profile",
+        action="store_true",
+        help="Omite el perfilado psicológico con Gemini/LLaMA",
+    )
+    process_all_parser.add_argument(
+        "--keep-audio",
+        action="store_true",
+        help="Conserva los audios pesados en lugar de eliminarlos tras el perfilado",
+    )
+    process_all_parser.add_argument(
+        "--storage-dir",
+        type=str,
+        default="",
+        help="Ruta base del directorio de almacenamiento",
+    )
+
     # Subcomando: profile
     profile_parser = subparsers.add_parser("profile", help="Analiza y perfila psicológicamente una sesión ya procesada")
     profile_parser.add_argument(
@@ -1318,7 +1357,12 @@ def main():
     if not base_storage:
         base_storage = os.path.abspath(os.path.join(CURRENT_DIR, "..", "..", "storage"))
 
-    if args.command == "process":
+    if args.command in ("process", "process-all"):
+        if args.command == "process-all":
+            args.session = "all"
+            args.profile = not getattr(args, "no_profile", False)
+            args.delete_audio = not getattr(args, "keep_audio", False)
+
         if args.session == "all":
             raw_sessions_dir = os.path.join(base_storage, "raw_sessions")
             candidates = sorted(glob.glob(os.path.join(raw_sessions_dir, "*")))

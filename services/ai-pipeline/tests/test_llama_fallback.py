@@ -138,3 +138,158 @@ def test_digital_twin_forced_llama_backend(sample_user_profile):
     reply = chat.send_message("Test directo")
     assert reply == "Respuesta directa de LLaMA 3.3"
     mock_llama.chat.assert_called_once()
+
+
+def test_gemini_profiler_fallback_to_llama_on_quota():
+    """Verifica que GeminiProfiler delegue automáticamente a LLaMA cuando Gemini agota la cuota (429 RESOURCE_EXHAUSTED)."""
+    import json
+    from core.contracts.models import SessionTranscript, Utterance
+    from core.profiler.metrics import compute_user_metrics
+    from core.profiler.gemini_analyzer import GeminiProfiler, GeminiSessionEvaluation
+
+    transcript = SessionTranscript(
+        version="1.0.0",
+        session_id="2026-09-25_test_session",
+        processed_at=datetime.now(timezone.utc),
+        model="faster-whisper/medium",
+        utterances=[
+            Utterance(
+                id=1,
+                user_id="user_test",
+                username="test_user",
+                start_time=0.0,
+                end_time=3.0,
+                duration=3.0,
+                text="Bo, esto está tremendo posta!",
+                confidence=0.95,
+                overlapping_speakers=[],
+            )
+        ],
+    )
+    metrics = compute_user_metrics(transcript, "user_test")
+
+    mock_llama = MagicMock(spec=LlamaClient)
+    mock_llama.is_available.return_value = True
+    llama_evaluation_json = {
+        "openness_score": 0.8,
+        "openness_confidence": 0.9,
+        "openness_evidence": ["Bo, esto está tremendo posta!"],
+        "conscientiousness_score": 0.6,
+        "conscientiousness_confidence": 0.8,
+        "conscientiousness_evidence": ["Bo, esto está tremendo posta!"],
+        "extraversion_score": 0.85,
+        "extraversion_confidence": 0.95,
+        "extraversion_evidence": ["Bo, esto está tremendo posta!"],
+        "agreeableness_score": 0.7,
+        "agreeableness_confidence": 0.85,
+        "agreeableness_evidence": ["Bo, esto está tremendo posta!"],
+        "neuroticism_score": 0.3,
+        "neuroticism_confidence": 0.75,
+        "neuroticism_evidence": ["Bo, esto está tremendo posta!"],
+        "primary_role": "El Conductor",
+        "role_description": "Lidera la interacción con humor y confianza",
+        "conflict_style": "chicanas amigables",
+        "humor_type": "ironía cómplice",
+        "rioplatense_frequency": 0.45,
+        "favorite_slang": ["bo", "posta"],
+        "discourse_fillers": ["bo"],
+        "initiative": "iniciador",
+    }
+    mock_llama.chat.return_value = json.dumps(llama_evaluation_json)
+
+    profiler = GeminiProfiler(api_key="fake_key", mock=False)
+    profiler._llama_client = mock_llama
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.side_effect = Exception("429 RESOURCE_EXHAUSTED: Quota exceeded for quota metric 'Generate Content API'")
+    profiler._client = mock_client
+
+    evaluation = profiler.analyze_user_session(
+        transcript=transcript,
+        target_user_id="user_test",
+        target_username="test_user",
+        metrics=metrics,
+    )
+
+    assert isinstance(evaluation, GeminiSessionEvaluation)
+    assert evaluation.openness_score == 0.8
+    assert evaluation.extraversion_score == 0.85
+    assert evaluation.primary_role == "El Conductor"
+    assert "bo" in evaluation.favorite_slang
+    mock_llama.chat.assert_called_once()
+
+
+def test_gemini_profiler_uses_llama_when_gemini_key_missing():
+    """Verifica que si la API key de Gemini no está configurada o es vacía, use LLaMA si está disponible."""
+    import json
+    from core.contracts.models import SessionTranscript, Utterance
+    from core.profiler.metrics import compute_user_metrics
+    from core.profiler.gemini_analyzer import GeminiProfiler, GeminiSessionEvaluation
+
+    transcript = SessionTranscript(
+        version="1.0.0",
+        session_id="2026-09-25_test_session_2",
+        processed_at=datetime.now(timezone.utc),
+        model="faster-whisper/medium",
+        utterances=[
+            Utterance(
+                id=1,
+                user_id="user_test",
+                username="test_user",
+                start_time=0.0,
+                end_time=3.0,
+                duration=3.0,
+                text="Tranqui, que esto sale flama.",
+                confidence=0.95,
+                overlapping_speakers=[],
+            )
+        ],
+    )
+    metrics = compute_user_metrics(transcript, "user_test")
+
+    mock_llama = MagicMock(spec=LlamaClient)
+    mock_llama.is_available.return_value = True
+    llama_evaluation_json = {
+        "openness_score": 0.75,
+        "openness_confidence": 0.85,
+        "openness_evidence": ["Tranqui, que esto sale flama."],
+        "conscientiousness_score": 0.7,
+        "conscientiousness_confidence": 0.8,
+        "conscientiousness_evidence": ["Tranqui, que esto sale flama."],
+        "extraversion_score": 0.9,
+        "extraversion_confidence": 0.9,
+        "extraversion_evidence": ["Tranqui, que esto sale flama."],
+        "agreeableness_score": 0.8,
+        "agreeableness_confidence": 0.85,
+        "agreeableness_evidence": ["Tranqui, que esto sale flama."],
+        "neuroticism_score": 0.2,
+        "neuroticism_confidence": 0.7,
+        "neuroticism_evidence": ["Tranqui, que esto sale flama."],
+        "primary_role": "El Facilitador",
+        "role_description": "Promueve la tranquilidad y buen ambiente",
+        "conflict_style": "mediación y calma",
+        "humor_type": "humor relajado",
+        "rioplatense_frequency": 0.35,
+        "favorite_slang": ["flama", "tranqui"],
+        "discourse_fillers": ["tranqui"],
+        "initiative": "iniciador",
+    }
+    mock_llama.chat.return_value = json.dumps(llama_evaluation_json)
+
+    profiler = GeminiProfiler(mock=True)
+    profiler.api_key = ""
+    profiler._llama_client = mock_llama
+
+    evaluation = profiler.analyze_user_session(
+        transcript=transcript,
+        target_user_id="user_test",
+        target_username="test_user",
+        metrics=metrics,
+    )
+
+    assert isinstance(evaluation, GeminiSessionEvaluation)
+    assert evaluation.openness_score == 0.75
+    assert evaluation.primary_role == "El Facilitador"
+    mock_llama.chat.assert_called_once()
+
+

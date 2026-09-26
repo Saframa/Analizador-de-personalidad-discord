@@ -145,7 +145,10 @@ python main.py watch
 
 ### B. Procesar sesiones grabadas manualmente
 ```powershell
-# Procesar TODAS las sesiones pendientes acumuladas en lote:
+# Atajo directo: procesa, transcribe y perfila TODAS las sesiones acumuladas:
+python main.py process-all
+
+# O con el comando completo configurable:
 python main.py process --session all --profile --delete-audio
 
 # Procesar solo la última sesión:

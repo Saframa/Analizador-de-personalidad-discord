@@ -50,6 +50,35 @@ def setup_tts_gpu_environment() -> None:
         logger.warning(f"No se pudo configurar ffmpeg: {e}")
 
 
+# Inicializar entorno TTS tempranamente
+setup_tts_gpu_environment()
+
+
+def _safe_transcribe_fallback(ref_audio, language=None):
+    """
+    Fallback ultra-robusto para transcripción de audio de referencia.
+    Utiliza faster-whisper nativo en CUDA/CPU evitando invocar el pipeline de transformers
+    y eliminando el error WinError 127 / FileNotFoundError en Windows.
+    """
+    try:
+        from core.stt.transcriber import WhisperTranscriber
+        transcriber = WhisperTranscriber(model_size="base")
+        segs = transcriber.transcribe_file(ref_audio, language=language or "es")
+        text = " ".join(s["text"].strip() for s in segs if s.get("text")).strip()
+        if text:
+            return text
+    except Exception as e:
+        logger.warning(f"Fallback faster-whisper no pudo transcribir {ref_audio}: {e}")
+    return "Hola, buenas."
+
+
+try:
+    import f5_tts.infer.utils_infer as utils_infer
+    utils_infer.transcribe = _safe_transcribe_fallback
+except Exception:
+    pass
+
+
 def release_tts_gpu_memory(model=None) -> None:
     """
     Protocolo de Liberación de VRAM:
@@ -77,6 +106,7 @@ class BaseVoiceCloner(ABC):
         reference_audio_path: str,
         output_path: str,
         reference_text: Optional[str] = None,
+        **kwargs,
     ) -> str:
         """Sintetiza target_text con la voz clonada de reference_audio_path."""
         pass
@@ -123,6 +153,23 @@ class BaseVoiceCloner(ABC):
             except Exception as e:
                 logger.warning(f"No se pudo leer {standard_txt}: {e}")
 
+        # Si aún no tenemos texto de referencia, auto-generar con faster-whisper y guardar
+        if not ref_txt:
+            try:
+                from core.stt.transcriber import WhisperTranscriber
+                logger.info(f"Auto-generando transcripción de referencia para {ref_wav}...")
+                transcriber = WhisperTranscriber(model_size="base")
+                segs = transcriber.transcribe_file(ref_wav)
+                ref_txt = " ".join(s["text"].strip() for s in segs if s.get("text")).strip()
+                if ref_txt:
+                    target_txt_file = prompt_txt if ref_wav == prompt_wav else standard_txt
+                    with open(target_txt_file, "w", encoding="utf-8") as f:
+                        f.write(ref_txt)
+                    logger.info(f"Transcripción guardada en {target_txt_file}")
+            except Exception as e:
+                logger.warning(f"No se pudo auto-generar texto de referencia para {ref_wav}: {e}")
+                ref_txt = "Hola, buenas."
+
         if not output_path:
             out_dir = os.path.join(base_storage_dir, "twin_outputs", user_id)
             os.makedirs(out_dir, exist_ok=True)
@@ -131,11 +178,28 @@ class BaseVoiceCloner(ABC):
         else:
             os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
+        # Calibrar velocidad de habla según cadencia del perfil para mayor realismo
+        user_speed = 0.98
+        profile_path = os.path.join(base_storage_dir, "profiles", f"{user_id}.json")
+        if os.path.exists(profile_path):
+            try:
+                import json
+                with open(profile_path, "r", encoding="utf-8") as pf:
+                    pdata = json.load(pf)
+                    cadence = pdata.get("communication_style", {}).get("cadence", "")
+                    if cadence == "rapido":
+                        user_speed = 1.02
+                    elif cadence == "pausado":
+                        user_speed = 0.94
+            except Exception:
+                pass
+
         return self.clone_speech(
             target_text=target_text,
             reference_audio_path=ref_wav,
             output_path=output_path,
             reference_text=ref_txt,
+            speed=user_speed,
         )
 
 
@@ -154,6 +218,7 @@ class MockVoiceCloner(BaseVoiceCloner):
         reference_audio_path: str,
         output_path: str,
         reference_text: Optional[str] = None,
+        **kwargs,
     ) -> str:
         clean_text = normalize_text_for_tts(target_text)
         duration_sec = max(0.5, min(10.0, len(clean_text) * 0.05))
@@ -180,12 +245,18 @@ class F5TTSVoiceCloner(BaseVoiceCloner):
         repo_id: str = "jpgallegoar/F5-Spanish",
         device: Optional[str] = None,
         sample_rate: int = 24000,
+        cfg_strength: float = 2.3,
+        nfe_step: int = 48,
+        speed: float = 0.98,
     ):
         setup_tts_gpu_environment()
         self.model_name = model_name
         self.repo_id = repo_id
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.sample_rate = sample_rate
+        self.cfg_strength = cfg_strength
+        self.nfe_step = nfe_step
+        self.speed = speed
         self._model = None
 
     def _get_model(self):
@@ -210,16 +281,43 @@ class F5TTSVoiceCloner(BaseVoiceCloner):
         reference_audio_path: str,
         output_path: str,
         reference_text: Optional[str] = None,
+        cfg_strength: Optional[float] = None,
+        nfe_step: Optional[int] = None,
+        speed: Optional[float] = None,
+        **kwargs,
     ) -> str:
         if not os.path.exists(reference_audio_path):
             raise FileNotFoundError(f"Audio de referencia no encontrado: {reference_audio_path}")
+
+        # Garantizar que reference_text nunca sea None ni vacío para evitar caídas en F5-TTS
+        if not reference_text or not reference_text.strip():
+            try:
+                from core.stt.transcriber import WhisperTranscriber
+                transcriber = WhisperTranscriber(model_size="base")
+                segs = transcriber.transcribe_file(reference_audio_path)
+                reference_text = " ".join(s["text"].strip() for s in segs if s.get("text")).strip()
+            except Exception as e:
+                logger.warning(f"Error auto-transcribiendo reference_audio_path: {e}")
+            if not reference_text:
+                reference_text = "Hola, buenas."
 
         clean_text = normalize_text_for_tts(target_text)
         if not clean_text:
             clean_text = "..."
 
-        chunks = chunk_text_by_sentences(clean_text, max_words_per_chunk=30)
+        # Si la respuesta es de longitud conversacional estándar (<= 25 palabras),
+        # sintetizar en una sola pasada continua para preservar la melodía rioplatense y evitar truncamientos
+        words = clean_text.split()
+        if len(words) <= 25:
+            chunks = [clean_text]
+        else:
+            chunks = chunk_text_by_sentences(clean_text, max_words_per_chunk=25)
+
         model = self._get_model()
+
+        cfg = cfg_strength if cfg_strength is not None else self.cfg_strength
+        nfe = nfe_step if nfe_step is not None else self.nfe_step
+        spd = speed if speed is not None else self.speed
 
         generated_chunks = []
         sr = self.sample_rate
@@ -228,11 +326,12 @@ class F5TTSVoiceCloner(BaseVoiceCloner):
             for idx, chunk in enumerate(chunks):
                 wav, sample_rate, _ = model.infer(
                     ref_file=reference_audio_path,
-                    ref_text=reference_text or "",
+                    ref_text=reference_text,
                     gen_text=chunk,
-                    cfg_strength=2.0,
-                    nfe_step=32,
-                    speed=1.0,
+                    cfg_strength=cfg,
+                    nfe_step=nfe,
+                    speed=spd,
+                    target_rms=0.10,
                 )
                 generated_chunks.append(wav)
                 sr = sample_rate

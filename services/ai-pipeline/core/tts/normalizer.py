@@ -55,6 +55,10 @@ def normalize_text_for_tts(text: str) -> str:
         (r"\bvenis\b", "venís"),
         (r"\bestas\b", "estás"),
         (r"\bveni\b", "vení"),
+        (r"\bvenite\b", "veníte"),
+        (r"\banda\b", "andá"),
+        (r"\btoma\b", "tomá"),
+        (r"\bfijate\b", "fijate"),
         (r"\bhace\s+(eso|lo|una|un|algo|las|los|esto)\b", r"hacé \1"),
         (r"\bdeja\s+(quieto|de|eso|lo|las|los|que)\b", r"dejá \1"),
         (r"\bpara\s+(un\s+poco|bo|che|ahí|ahi|loco|fiera|la\s+mano)\b", r"pará \1"),
@@ -69,8 +73,13 @@ def normalize_text_for_tts(text: str) -> str:
     text = re.sub(r"\b(ja){3,}\b", "jaja jaja", text, flags=re.IGNORECASE)
     text = re.sub(r"\b(je){3,}\b", "jeje jeje", text, flags=re.IGNORECASE)
 
-    # 5. Pausas prosódicas antes de muletillas terminales rioplatenses (cesura previa requerida en habla oral)
+    # 5. Pausas prosódicas para muletillas rioplatenses (evita que se peguen a la siguiente o anterior palabra)
+    # Separa 'bo' o 'che' con coma para que no se fusionen fonéticamente con la palabra previa (ej. 'hacés bo' -> 'hacés, bo')
+    text = re.sub(r"([a-záéíóúñÁÉÍÓÚÑ])\s+(bo|che)\b", r"\1, \2", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bbo\s+([a-záéíóúñÁÉÍÓÚÑ])", r"bo, \1", text, flags=re.IGNORECASE)
     text = re.sub(r"(\w)\s+(bo|ta)[\.!?]?$", r"\1, \2.", text, flags=re.IGNORECASE)
+    text = re.sub(r",\s*,+", ", ", text)
+
 
     # 6. Expansión de símbolos a palabras fonéticas
     text = text.replace("%", " por ciento ")
@@ -95,6 +104,10 @@ def normalize_text_for_tts(text: str) -> str:
     # 10. Normalizar espacios múltiples
     text = re.sub(r"\s+", " ", text).strip()
 
+    # 11. Garantizar terminación de frase limpia para evitar estiramiento de vocales finales
+    if text and text[-1] not in ".?!¡¿":
+        text += "."
+
     return text
 
 
@@ -102,13 +115,11 @@ def chunk_text_by_sentences(text: str, max_words_per_chunk: int = 30) -> List[st
     """
     Divide un texto extenso en fragmentos lógicos delimitados por oraciones o puntuación,
     evitando que fragmentos individuales superen `max_words_per_chunk`.
-    Esto optimiza la prosodia de los modelos de difusión y previene cortes de respiración.
     """
     text = text.strip()
     if not text:
         return []
 
-    # Separar por delimitadores de fin de oración preservando el signo
     raw_sentences = re.split(r"(?<=[.!?])\s+", text)
     chunks: List[str] = []
 
@@ -121,7 +132,6 @@ def chunk_text_by_sentences(text: str, max_words_per_chunk: int = 30) -> List[st
         if len(words) <= max_words_per_chunk:
             chunks.append(sentence)
         else:
-            # Si una sola oración es muy larga, intentamos subdividir por comas o punto y coma
             sub_clauses = re.split(r"(?<=[,;])\s+", sentence)
             current_clause = ""
             for clause in sub_clauses:

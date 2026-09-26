@@ -6,6 +6,8 @@ protocolo anti-alucinaciones con citas textuales obligatorias y modo mock offlin
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 import time
 from typing import Any, List, Literal, Optional
@@ -27,6 +29,8 @@ from core.profiler.dialect_guide import (
     RIOPLATENSE_SYSTEM_INSTRUCTIONS,
 )
 from core.profiler.metrics import ConversationalMetrics
+
+logger = logging.getLogger(__name__)
 
 
 class GeminiSessionEvaluation(BaseModel):
@@ -98,6 +102,17 @@ class GeminiProfiler:
         self.model_name = model_name or os.getenv("GEMINI_MODEL", "gemini-flash-latest")
         self.mock = mock or (not self.api_key or self.api_key == "tu_api_key_aqui")
         self._client = None
+        self._llama_client = None
+
+    @property
+    def llama_client(self):
+        if self._llama_client is None:
+            try:
+                from core.twin.llama_client import LlamaClient
+                self._llama_client = LlamaClient()
+            except Exception:
+                pass
+        return self._llama_client
 
     def _get_client(self):
         if self._client is None and not self.mock:
@@ -166,6 +181,13 @@ class GeminiProfiler:
         Si mock=True o no hay API key, genera una evaluación determinista usando el texto real.
         """
         if self.mock:
+            # Si Gemini está en mock por falta de API key pero LLaMA está disponible, usar LLaMA
+            if self.llama_client and self.llama_client.is_available() and self.api_key in (None, "", "tu_api_key_aqui"):
+                try:
+                    print(f"🦙 [Gemini API Key inactiva: usando LLaMA (Groq LLaMA 3.3) para análisis de personalidad]...")
+                    return self._llama_evaluation(transcript, target_user_id, target_username, metrics, threads)
+                except Exception as e:
+                    logger.warning(f"Fallo en evaluación con LLaMA ({e}). Usando análisis heurístico.")
             return self._mock_evaluation(transcript, target_user_id, target_username, metrics)
 
         from google.genai import types
@@ -216,13 +238,104 @@ REGLAS CRÍTICAS:
                 )
                 return response.parsed
             except Exception as e:
+                err_str = str(e).lower()
+                is_quota = any(k in err_str for k in ["429", "resource_exhausted", "quota", "rate limit", "ratelimit"])
+                if is_quota:
+                    print(f"\n🦙 [Cuota de Gemini agotada ({e}). Delegando inmediatamente a LLaMA (Groq LLaMA 3.3)]...")
+                    if self.llama_client and self.llama_client.is_available():
+                        try:
+                            return self._llama_evaluation(transcript, target_user_id, target_username, metrics, threads)
+                        except Exception as llama_err:
+                            logger.warning(f"Fallo en evaluación con LLaMA ({llama_err}).")
+                    print("   Usando análisis heurístico de respaldo.")
+                    return self._mock_evaluation(transcript, target_user_id, target_username, metrics)
+
                 if attempt < max_retries - 1:
                     wait_sec = backoff_delays[attempt]
                     print(f"⚠️  [Gemini Retry] Intento {attempt + 1}/{max_retries} falló ({e}). Reintentando en {wait_sec:.0f}s...")
                     time.sleep(wait_sec)
                 else:
-                    print(f"❌ [Gemini Error] Tras {max_retries} intentos falló la API ({e}). Usando análisis heurístico de respaldo.")
+                    print(f"❌ [Gemini Error] Tras {max_retries} intentos falló la API ({e}).")
+                    if self.llama_client and self.llama_client.is_available():
+                        try:
+                            print(f"🦙 [Delegando análisis a LLaMA tras fallos de Gemini]...")
+                            return self._llama_evaluation(transcript, target_user_id, target_username, metrics, threads)
+                        except Exception as llama_err:
+                            logger.warning(f"Fallo en evaluación con LLaMA ({llama_err}).")
+                    print("   Usando análisis heurístico de respaldo.")
                     return self._mock_evaluation(transcript, target_user_id, target_username, metrics)
+
+    def _llama_evaluation(
+        self,
+        transcript: SessionTranscript,
+        target_user_id: str,
+        target_username: str,
+        metrics: ConversationalMetrics,
+        threads: Optional[List[Any]] = None,
+    ) -> GeminiSessionEvaluation:
+        """
+        Ejecuta el análisis psicológico y sociolingüístico usando modelos LLaMA
+        (Groq LLaMA 3.3 / OpenRouter / Ollama) garantizando salida estructurada compatible.
+        """
+        dialogue = self._prepare_transcript_context(transcript, target_user_id, threads=threads)
+        schema_json = json.dumps(GeminiSessionEvaluation.model_json_schema(), ensure_ascii=False)
+
+        system_prompt = f"""Eres un psicólogo y sociolingüista experto en análisis de personalidad y dinámicas grupales en Uruguay y el Río de la Plata.
+Tu objetivo es analizar la conducta, psicología profunda (Big Five), rol en el grupo y estilo comunicativo del usuario en base a sus audios y transcripciones reales de Discord.
+
+{RIOPLATENSE_SYSTEM_INSTRUCTIONS}
+
+Debes responder ÚNICAMENTE con un objeto JSON válido (sin texto previo ni posterior, sin markdown) que cumpla estrictamente con este JSON Schema:
+{schema_json}
+"""
+
+        user_prompt = f"""Analiza la conducta, psicología y estilo de comunicación de {target_username} (ID: {target_user_id}) en la sesión '{transcript.session_id}'.
+
+MÉTRICAS CUANTITATIVAS OBSERVADAS:
+- Tiempo total hablado: {metrics.total_speaking_seconds:.1f} segundos
+- Cantidad de intervenciones: {metrics.turn_count}
+- Promedio de palabras por turno: {metrics.avg_words_per_turn:.1f}
+- Proporción de interrupciones: {metrics.interruption_ratio:.2f}
+- Cadencia de locución: {metrics.cadence} ({metrics.words_per_second:.1f} palabras/segundo)
+
+TRANSCRIPCIÓN Y CONTEXTO DISCURSIVO DE LA SESIÓN:
+{dialogue}
+
+REGLAS CRÍTICAS:
+1. Recuerda la calibración rioplatense (chicanas afectuosas, 'bo', 'ta', 'salado', ironía cómplice).
+2. CADA rasgo del Big Five debe incluir citas textuales directas tomadas de las intervenciones de {target_username}.
+3. Dinámica social: identifica a quién dirige chicanas (teasing_targets) y con quién muestra mayor afinidad (closest_friends).
+4. Si el usuario habló poco, asigna score 0.5 y confianza < 0.5.
+5. Devuelve solo el JSON válido que cumpla con el esquema.
+"""
+
+        raw_response = self.llama_client.chat(
+            system_prompt=system_prompt,
+            messages=[{"role": "user", "text": user_prompt}],
+            temperature=0.2,
+            max_tokens=2200,
+        )
+
+        clean_json = raw_response.strip()
+        if clean_json.startswith("```json"):
+            clean_json = clean_json[7:]
+        if clean_json.startswith("```"):
+            clean_json = clean_json[3:]
+        if clean_json.endswith("```"):
+            clean_json = clean_json[:-3]
+        clean_json = clean_json.strip()
+
+        data = json.loads(clean_json)
+
+        # Garantizar que cada rasgo del Big Five tenga al menos una cita de evidencia
+        user_utterances = [u.text for u in transcript.utterances if u.user_id == target_user_id]
+        fallback_quote = user_utterances[0] if user_utterances else f"Participante en {transcript.session_id}"
+        for trait in ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]:
+            ev_key = f"{trait}_evidence"
+            if not data.get(ev_key):
+                data[ev_key] = [fallback_quote]
+
+        return GeminiSessionEvaluation.model_validate(data)
 
     def _mock_evaluation(
         self,

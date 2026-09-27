@@ -208,7 +208,7 @@ def reconcile_orphan_sessions(
                 user_id = os.path.splitext(af)[0]
                 user_obj = user_mgr.get_user(user_id)
                 uname = user_obj.username if user_obj else f"user_{user_id[-4:]}"
-                dname = user_obj.display_name if user_obj else uname
+                dname = (user_obj.display_name if user_obj and user_obj.display_name else uname) or uname
 
                 participants.append(
                     ParticipantInfo(

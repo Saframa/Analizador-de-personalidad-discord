@@ -45,6 +45,7 @@ def init_database(db_path: Optional[str] = None) -> None:
                     total_speaking_seconds REAL DEFAULT 0.0,
                     total_sessions_analyzed INTEGER DEFAULT 0,
                     total_words_spoken INTEGER DEFAULT 0,
+                    total_unique_words INTEGER DEFAULT 0,
                     has_voice_sample INTEGER DEFAULT 0,
                     has_avatar INTEGER DEFAULT 0,
                     avatar_url TEXT,
@@ -121,3 +122,15 @@ def init_database(db_path: Optional[str] = None) -> None:
             """)
     finally:
         conn.close()
+
+    # Migration: add total_unique_words column if DB already exists without it
+    _conn2 = get_connection(db_path)
+    try:
+        _col_exists = _conn2.execute(
+            "SELECT COUNT(*) FROM pragma_table_info('users') WHERE name='total_unique_words'"
+        ).fetchone()[0]
+        if not _col_exists:
+            with _conn2:
+                _conn2.execute("ALTER TABLE users ADD COLUMN total_unique_words INTEGER DEFAULT 0")
+    finally:
+        _conn2.close()

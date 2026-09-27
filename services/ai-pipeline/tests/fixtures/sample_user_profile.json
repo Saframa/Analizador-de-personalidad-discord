@@ -5,6 +5,7 @@
   "last_updated": "2026-09-24T22:25:00.000Z",
   "total_sessions_analyzed": 5,
   "total_speaking_seconds": 1845.5,
+  "total_unique_words": 320,
   "big_five": {
     "openness": {
       "score": 0.75,

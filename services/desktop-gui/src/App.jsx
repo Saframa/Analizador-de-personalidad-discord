@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import Navigation from './components/Navigation';
 import GlobalStatsView from './components/GlobalStatsView';
 import UsersView from './components/UsersView';
+import SocialGraphView from './components/SocialGraphView';
 import VoiceChannelsView from './components/VoiceChannelsView';
 import HardwareView from './components/HardwareView';
 import TtsStudioView from './components/TtsStudioView';
 import UserDetailModal from './components/UserDetailModal';
 import ChatDrawer from './components/ChatDrawer';
+import PipelineLogsDrawer from './components/PipelineLogsDrawer';
 import { fetchStatus } from './api';
 import { AlertCircle, RotateCw } from 'lucide-react';
 
@@ -19,6 +21,7 @@ export default function App() {
   // Modales y Drawers
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [chatUserId, setChatUserId] = useState(null);
+  const [isLogsOpen, setIsLogsOpen] = useState(false);
 
   const pollStatus = async () => {
     try {
@@ -45,6 +48,7 @@ export default function App() {
         isMenuOpen={isMenuOpen}
         onToggleMenu={() => setIsMenuOpen(!isMenuOpen)}
         status={status}
+        onOpenLogs={() => setIsLogsOpen(true)}
       />
 
       {/* Banner de desconexión del backend si ocurre */}
@@ -76,6 +80,12 @@ export default function App() {
           <UsersView
             onSelectUser={(userId) => setSelectedUserId(userId)}
             onOpenChat={(userId) => setChatUserId(userId)}
+          />
+        )}
+
+        {currentTab === 'social' && (
+          <SocialGraphView
+            onSelectUser={(userId) => setSelectedUserId(userId)}
           />
         )}
 
@@ -114,6 +124,13 @@ export default function App() {
           onClose={() => setChatUserId(null)}
         />
       )}
+
+      {/* Drawer de Consola de Logs del Pipeline */}
+      <PipelineLogsDrawer
+        isOpen={isLogsOpen}
+        onClose={() => setIsLogsOpen(false)}
+        isProcessingGlobal={status?.daemons?.is_processing_batch}
+      />
     </div>
   );
 }

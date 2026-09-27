@@ -45,7 +45,7 @@ class ProfilerRepository:
                 SELECT 
                     user_id, username, display_name,
                     total_speaking_seconds, cadence, primary_role,
-                    has_avatar, avatar_url, has_voice_sample, total_words_spoken
+                    has_avatar, avatar_url, has_voice_sample, total_words_spoken, total_unique_words
                 FROM users
                 ORDER BY total_speaking_seconds DESC
             """).fetchall()
@@ -65,6 +65,7 @@ class ProfilerRepository:
                     "avatar_url": u["avatar_url"],
                     "has_voice_sample": bool(u["has_voice_sample"]),
                     "total_words_spoken": int(u["total_words_spoken"]),
+                    "total_unique_words": int(u["total_unique_words"] or 0),
                 })
 
             return {
@@ -88,7 +89,7 @@ class ProfilerRepository:
                     user_id, username, display_name, nicknames,
                     primary_role, humor_type, total_speaking_seconds,
                     total_sessions_analyzed, total_words_spoken,
-                    has_avatar, avatar_url, has_voice_sample
+                    has_avatar, avatar_url, has_voice_sample, total_unique_words
                 FROM users
                 ORDER BY total_speaking_seconds DESC
             """).fetchall()
@@ -107,6 +108,7 @@ class ProfilerRepository:
                     "total_speaking_seconds": sec,
                     "speaking_formatted": f"{int(sec // 60)}m",
                     "words_count": int(r["total_words_spoken"]),
+                    "unique_words_count": int(r["total_unique_words"] or 0),
                     "total_sessions_analyzed": int(r["total_sessions_analyzed"]),
                     "has_avatar": bool(r["has_avatar"]),
                     "avatar_url": r["avatar_url"],
@@ -168,7 +170,7 @@ class ProfilerRepository:
                 FROM vocabulary
                 WHERE user_id = ?
                 ORDER BY frequency DESC
-                LIMIT 200
+                LIMIT 1000
             """, (uid,)).fetchall()
 
             top_words = [[r["word"], int(r["frequency"])] for r in vocab_rows]
@@ -213,6 +215,7 @@ class ProfilerRepository:
                     "top_words": top_words,
                     "total_words": total_words,
                     "unique_words": len(top_words),
+                    "total_unique_words": int(u["total_unique_words"] or 0),
                 },
             }
         finally:
@@ -281,5 +284,107 @@ class ProfilerRepository:
         try:
             with conn:
                 conn.execute("DELETE FROM chat_logs WHERE user_id = ?", (user_id,))
+        finally:
+            conn.close()
+
+    def get_social_graph(self) -> Dict[str, Any]:
+        """
+        Retorna la red de interacciones, afinidad y conexiones sociales
+        entre los participantes del servidor a partir de las sesiones compartidas.
+        """
+        conn = self.get_connection()
+        try:
+            user_rows = conn.execute("""
+                SELECT user_id, username, display_name, primary_role, humor_type, 
+                       cadence, total_speaking_seconds, total_sessions_analyzed, 
+                       has_avatar, avatar_url
+                FROM users
+                ORDER BY total_speaking_seconds DESC
+            """).fetchall()
+
+            user_map = {}
+            nodes = []
+            max_sec = max([float(u["total_speaking_seconds"]) for u in user_rows], default=1.0)
+            if max_sec <= 0:
+                max_sec = 1.0
+
+            for u in user_rows:
+                sec = float(u["total_speaking_seconds"])
+                user_map[u["user_id"]] = u
+                nodes.append({
+                    "id": u["user_id"],
+                    "username": u["username"],
+                    "display_name": u["display_name"] or u["username"],
+                    "primary_role": u["primary_role"] or "Participante",
+                    "humor_type": u["humor_type"] or "Conversacional",
+                    "cadence": u["cadence"] or "moderado",
+                    "total_speaking_seconds": sec,
+                    "total_sessions_analyzed": int(u["total_sessions_analyzed"]),
+                    "speaking_formatted": f"{int(sec // 60)}m",
+                    "has_avatar": bool(u["has_avatar"]),
+                    "avatar_url": u["avatar_url"],
+                    "size_weight": max(0.25, min(1.0, sec / max_sec)),
+                })
+
+            pairs_cur = conn.execute("""
+                SELECT 
+                    sp1.user_id as u1,
+                    sp2.user_id as u2,
+                    COUNT(DISTINCT sp1.session_id) as sessions_together,
+                    SUM(sp1.speaking_seconds + sp2.speaking_seconds) as shared_speaking_sec
+                FROM session_participants sp1
+                JOIN session_participants sp2 ON sp1.session_id = sp2.session_id AND sp1.user_id < sp2.user_id
+                GROUP BY sp1.user_id, sp2.user_id
+                ORDER BY sessions_together DESC
+            """).fetchall()
+
+            edges = []
+            max_sessions = max([int(p["sessions_together"]) for p in pairs_cur], default=1)
+            if max_sessions <= 0:
+                max_sessions = 1
+
+            for p in pairs_cur:
+                u1_id = p["u1"]
+                u2_id = p["u2"]
+                if u1_id not in user_map or u2_id not in user_map:
+                    continue
+
+                together = int(p["sessions_together"])
+                shared_sec = float(p["shared_speaking_sec"])
+                affinity = round(max(0.1, min(1.0, together / max_sessions)), 3)
+
+                edges.append({
+                    "source": u1_id,
+                    "target": u2_id,
+                    "sessions_together": together,
+                    "shared_speaking_seconds": shared_sec,
+                    "shared_speaking_formatted": f"{int(shared_sec // 60)}m",
+                    "affinity": affinity,
+                    "weight": affinity,
+                })
+
+            top_pair = None
+            if edges:
+                top = edges[0]
+                u1_obj = user_map[top["source"]]
+                u2_obj = user_map[top["target"]]
+                top_pair = {
+                    "u1_id": top["source"],
+                    "u2_id": top["target"],
+                    "u1_name": u1_obj["display_name"] or u1_obj["username"],
+                    "u2_name": u2_obj["display_name"] or u2_obj["username"],
+                    "sessions_together": top["sessions_together"],
+                    "shared_time": top["shared_speaking_formatted"],
+                }
+
+            return {
+                "nodes": nodes,
+                "edges": edges,
+                "stats": {
+                    "total_nodes": len(nodes),
+                    "total_edges": len(edges),
+                    "top_pair": top_pair,
+                }
+            }
         finally:
             conn.close()

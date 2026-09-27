@@ -181,6 +181,11 @@ export default function GlobalStatsView({ onSelectUser }) {
                     <div className="text-xs text-slate-500">
                       {item.total_words_spoken.toLocaleString()} palabras
                     </div>
+                    {item.total_unique_words > 0 && (
+                      <div className="text-[10px] text-violet-400/70">
+                        {item.total_unique_words.toLocaleString()} únicas
+                      </div>
+                    )}
                   </div>
                 </div>
 

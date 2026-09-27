@@ -67,3 +67,23 @@ def test_api_user_detail(client):
         assert data["user_id"] == target_id
         assert "big_five" in data
         assert "communication_style" in data
+
+
+def test_api_pipeline_logs(client):
+    res = client.get("/api/pipeline/logs")
+    assert res.status_code == 200
+    data = res.json()
+    assert "is_running" in data
+    assert "logs" in data
+    assert isinstance(data["logs"], list)
+
+
+def test_api_social_graph(client):
+    res = client.get("/api/stats/social-graph")
+    assert res.status_code == 200
+    data = res.json()
+    assert "nodes" in data
+    assert "edges" in data
+    assert "stats" in data
+    assert isinstance(data["nodes"], list)
+    assert isinstance(data["edges"], list)

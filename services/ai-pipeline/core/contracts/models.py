@@ -187,6 +187,7 @@ class UserProfile(BaseModel):
     last_updated: datetime
     total_sessions_analyzed: int = Field(..., ge=1)
     total_speaking_seconds: float = Field(..., ge=0.0)
+    total_unique_words: int = Field(default=0, ge=0, description="Cantidad total de palabras únicas pronunciadas")
     big_five: BigFiveTraits
     communication_style: CommunicationStyle
     group_role: GroupRole

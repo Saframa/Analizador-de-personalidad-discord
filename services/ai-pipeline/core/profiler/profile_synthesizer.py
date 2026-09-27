@@ -31,6 +31,7 @@ from core.contracts.models import (
 )
 from core.profiler.gemini_analyzer import GeminiSessionEvaluation
 from core.profiler.metrics import ConversationalMetrics, SessionSocialTemporalMetrics
+from core.profiler.lexicon_manager import LexiconManager
 
 
 
@@ -259,6 +260,7 @@ class ProfileSynthesizer:
         self.profiles_dir = os.path.join(self.storage_dir, "profiles")
         self.clean_samples_dir = os.path.join(self.storage_dir, "clean_samples")
         os.makedirs(self.profiles_dir, exist_ok=True)
+        self.lexicon_mgr = LexiconManager(self.storage_dir)
 
     def load_existing_profile(self, user_id: str) -> Optional[UserProfile]:
         """Carga el perfil acumulado previo si existe en disco."""
@@ -292,6 +294,29 @@ class ProfileSynthesizer:
         existing = self.load_existing_profile(user_id)
         clean_samples = self.discover_clean_samples(user_id)
         now = datetime.now(timezone.utc)
+
+        # Actualizar y preservar registro organizado de léxico (storage/profiles/<user_id>/lexicon.json)
+        lex_data = self.lexicon_mgr.load_lexicon(user_id)
+        current_vocab = dict(lex_data.get("vocabulary", {}))
+        if not current_vocab and existing and getattr(existing.dialect_markers, "vocabulary_frequencies", None):
+            current_vocab = dict(existing.dialect_markers.vocabulary_frequencies)
+
+        session_vocab = getattr(session_metrics, "session_vocabulary", {}) or {}
+        for word, count in session_vocab.items():
+            current_vocab[word] = current_vocab.get(word, 0) + count
+
+        sorted_vocab = dict(sorted(current_vocab.items(), key=lambda item: item[1], reverse=True))
+        total_unique_words = len(sorted_vocab)
+        total_words_spoken = sum(sorted_vocab.values())
+
+        self.lexicon_mgr.save_lexicon(user_id, {
+            "user_id": user_id,
+            "username": username,
+            "total_words_spoken": total_words_spoken,
+            "total_unique_words": total_unique_words,
+            "last_updated": now.isoformat(),
+            "vocabulary": sorted_vocab,
+        })
 
         if existing is None:
             # Caso 1: Primera sesión analizada para este usuario (N = 0 -> N = 1)
@@ -336,8 +361,7 @@ class ProfileSynthesizer:
                 conflict_style=evaluation.conflict_style,
             )
 
-            session_vocab = getattr(session_metrics, "session_vocabulary", {}) or {}
-            sorted_vocab = dict(sorted(session_vocab.items(), key=lambda x: x[1], reverse=True)[:500])
+
 
             verified_slang = filter_verified_slang(list(dict.fromkeys(evaluation.favorite_slang)), sorted_vocab)
             verified_fillers = filter_verified_slang(list(dict.fromkeys(evaluation.discourse_fillers)), sorted_vocab)
@@ -362,6 +386,7 @@ class ProfileSynthesizer:
                 last_updated=now,
                 total_sessions_analyzed=1,
                 total_speaking_seconds=round(session_metrics.total_speaking_seconds, 2),
+                total_unique_words=total_unique_words,
                 big_five=big_five,
                 communication_style=comm_style,
                 group_role=group_role,
@@ -440,12 +465,7 @@ class ProfileSynthesizer:
             merged_slang = list(dict.fromkeys(existing.dialect_markers.favorite_slang + evaluation.favorite_slang))
             merged_fillers = list(dict.fromkeys(existing.dialect_markers.discourse_fillers + evaluation.discourse_fillers))
 
-            session_vocab = getattr(session_metrics, "session_vocabulary", {}) or {}
-            total_vocab = dict(existing.dialect_markers.vocabulary_frequencies or {})
-            for word, count in session_vocab.items():
-                total_vocab[word] = total_vocab.get(word, 0) + count
 
-            sorted_vocab = dict(sorted(total_vocab.items(), key=lambda x: x[1], reverse=True)[:500])
 
             verified_slang = filter_verified_slang(merged_slang, sorted_vocab)
             verified_fillers = filter_verified_slang(merged_fillers, sorted_vocab)
@@ -477,6 +497,7 @@ class ProfileSynthesizer:
                 last_updated=now,
                 total_sessions_analyzed=n_prev + 1,
                 total_speaking_seconds=round(existing.total_speaking_seconds + session_metrics.total_speaking_seconds, 2),
+                total_unique_words=total_unique_words,
                 big_five=big_five,
                 communication_style=comm_style,
                 group_role=group_role,

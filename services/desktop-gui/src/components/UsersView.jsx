@@ -173,6 +173,12 @@ export default function UsersView({ onSelectUser, onOpenChat }) {
                   <BookOpen size={13} className="text-emerald-400" />
                   <span>{(user.words_count || 0).toLocaleString()} pal.</span>
                 </div>
+                {user.unique_words_count > 0 && (
+                  <div className="col-span-2 flex items-center space-x-1.5 text-slate-500">
+                    <span className="text-violet-400 font-mono text-[10px]">◈</span>
+                    <span>{(user.unique_words_count || 0).toLocaleString()} únicas</span>
+                  </div>
+                )}
               </div>
             </div>
 

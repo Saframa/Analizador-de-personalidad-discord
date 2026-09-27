@@ -297,6 +297,13 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
                   </div>
                 </div>
                 <div>
+                  <div className="text-slate-500 text-[11px]">Palabras Únicas</div>
+                  <div className="text-sm font-bold text-slate-200 mt-0.5 flex items-center space-x-1.5">
+                    <span className="text-violet-400 font-mono text-sm">◈</span>
+                    <span>{(lexicon.total_unique_words || lexicon.unique_words || 0).toLocaleString()}</span>
+                  </div>
+                </div>
+                <div>
                   <div className="text-slate-500 text-[11px]">Muestra TTS</div>
                   <div className="text-sm font-bold mt-0.5 flex items-center space-x-1.5">
                     {user.has_voice_sample ? (
@@ -440,7 +447,7 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
                         Diccionario y Frecuencia de Palabras
                       </h3>
                       <p className="text-[11px] text-slate-500">
-                        {lexicon.unique_words || filteredWords.length} términos únicos catalogados
+                        {(lexicon.total_unique_words || lexicon.unique_words || filteredWords.length).toLocaleString()} términos únicos catalogados
                       </p>
                     </div>
 
@@ -472,7 +479,7 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
 
                   {/* Lista de palabras con frecuencias */}
                   <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1">
-                    {filteredWords.slice(0, 50).map(([word, count], idx) => {
+                    {filteredWords.slice(0, 150).map(([word, count], idx) => {
                       const barWidth = Math.round((count / maxWordFreq) * 100);
                       return (
                         <div

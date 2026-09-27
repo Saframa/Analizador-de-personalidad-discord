@@ -118,3 +118,22 @@ export async function leaveDiscordChannel() {
   return res.json();
 }
 
+export async function fetchPipelineLogs(tail = 150) {
+  const res = await fetch(`${BASE_URL}/api/pipeline/logs?tail=${tail}`);
+  if (!res.ok) throw new Error('Error al obtener logs del pipeline');
+  return res.json();
+}
+
+export async function clearPipelineLogs() {
+  const res = await fetch(`${BASE_URL}/api/pipeline/logs/clear`, {
+    method: 'POST',
+  });
+  return res.json();
+}
+
+export async function fetchSocialGraph() {
+  const res = await fetch(`${BASE_URL}/api/stats/social-graph`);
+  if (!res.ok) throw new Error('Error al obtener grafo social');
+  return res.json();
+}
+

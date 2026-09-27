@@ -33,6 +33,7 @@ AVATARS_DIR = os.path.join(STORAGE_DIR, "profiles", "avatars")
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
+from collections import deque
 from core.contracts.models import UserProfile
 from core.twin.chat_session import DigitalTwinChat
 from core.tts.cloner import F5TTSVoiceCloner
@@ -53,6 +54,14 @@ _background_job_status: Dict[str, Any] = {
     "last_run": None,
     "logs": [],
 }
+_recent_pipeline_logs: deque = deque(maxlen=300)
+
+
+def _append_pipeline_log(text: str):
+    clean = text.strip()
+    if clean:
+        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        _recent_pipeline_logs.append(f"[{ts}] {clean}")
 
 
 def get_voice_cloner() -> F5TTSVoiceCloner:
@@ -460,21 +469,33 @@ def toggle_watcher():
                         os.remove(lock_file)
                     except Exception:
                         pass
+            _append_pipeline_log("⏹️ [VIGILANTE] Vigilante de IA continuo pausado.")
             return {"status": "stopped", "message": "Vigilante de IA detenido."}
         except Exception as e:
             return {"status": "error", "message": str(e)}
+    else:
         try:
+            for lock_name in [".watcher.pid", "watch.pid"]:
+                lock_file = os.path.join(STORAGE_DIR, lock_name)
+                if os.path.exists(lock_file):
+                    try:
+                        os.remove(lock_file)
+                    except Exception:
+                        pass
+
             logs_dir = os.path.join(STORAGE_DIR, "logs")
             os.makedirs(logs_dir, exist_ok=True)
             log_file = open(os.path.join(logs_dir, "watcher.log"), "a", encoding="utf-8")
-            subprocess.Popen(
-                [sys.executable, "-u", "main.py", "watch"],
+            proc = subprocess.Popen(
+                [sys.executable, "-u", "main.py", "watch", "--storage-dir", STORAGE_DIR],
                 cwd=BASE_DIR,
                 stdout=log_file,
                 stderr=log_file,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
             )
-            return {"status": "started", "message": "Vigilante de IA iniciado en segundo plano."}
+            time.sleep(0.5)
+            _append_pipeline_log(f"👀 [VIGILANTE] Vigilante de IA continuo iniciado (PID {proc.pid}).")
+            return {"status": "started", "message": f"Vigilante de IA iniciado en segundo plano (PID {proc.pid})."}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
@@ -482,21 +503,55 @@ def toggle_watcher():
 def _run_batch_process():
     global _background_job_status
     _background_job_status["is_running"] = True
-    _background_job_status["current_task"] = "Procesando todas las sesiones pendientes..."
+    _background_job_status["current_task"] = "Iniciando procesamiento por lotes..."
+    _append_pipeline_log("🚀 [PIPELINE] Iniciando procesamiento por lotes en segundo plano...")
+
+    logs_dir = os.path.join(STORAGE_DIR, "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    pipe_log_path = os.path.join(logs_dir, "pipeline.log")
+
     try:
-        cmd = [sys.executable, "main.py", "process-all"]
-        proc = subprocess.run(cmd, cwd=BASE_DIR, capture_output=True, text=True)
+        cmd = [sys.executable, "-u", "main.py", "process-all"]
+        proc = subprocess.Popen(
+            cmd,
+            cwd=BASE_DIR,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+
+        with open(pipe_log_path, "a", encoding="utf-8") as f:
+            for line in proc.stdout:
+                clean_line = line.strip()
+                if clean_line:
+                    _append_pipeline_log(clean_line)
+                    f.write(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {clean_line}\n")
+                    f.flush()
+                    if "PROCESANDO SESION:" in clean_line:
+                        _background_job_status["current_task"] = clean_line.replace("PROCESANDO SESION:", "").strip()
+                    elif "faster-whisper" in clean_line:
+                        _background_job_status["current_task"] = "Transcribiendo audio con faster-whisper (CUDA)..."
+                    elif "Silero VAD" in clean_line:
+                        _background_job_status["current_task"] = "Detectando intervalos de voz con Silero VAD..."
+                    elif "Gemini" in clean_line or "perfilado" in clean_line.lower():
+                        _background_job_status["current_task"] = "Generando síntesis de personalidad con Gemini..."
+        proc.wait()
         try:
             sync_all(STORAGE_DIR, DB_PATH)
         except Exception:
             pass
         _background_job_status["last_run"] = {
             "success": proc.returncode == 0,
-            "stdout": proc.stdout[-500:] if proc.stdout else "",
-            "stderr": proc.stderr[-500:] if proc.stderr else "",
             "finished_at": time.time(),
         }
+        if proc.returncode == 0:
+            _append_pipeline_log("✅ [PIPELINE] Procesamiento completado exitosamente.")
+        else:
+            _append_pipeline_log(f"⚠️ [PIPELINE] Finalizó con código de salida {proc.returncode}.")
     except Exception as e:
+        _append_pipeline_log(f"🚨 [PIPELINE ERROR] {e}")
         _background_job_status["last_run"] = {
             "success": False,
             "error": str(e),
@@ -515,6 +570,41 @@ def trigger_process_all(background_tasks: BackgroundTasks):
 
     background_tasks.add_task(_run_batch_process)
     return {"status": "accepted", "message": "Procesamiento en lote iniciado en la GPU."}
+
+
+@app.get("/api/pipeline/logs")
+def get_pipeline_logs(tail: int = 150):
+    """Retorna las líneas de log más recientes del pipeline y el estado de ejecución."""
+    global _recent_pipeline_logs
+    if not _recent_pipeline_logs:
+        log_path = os.path.join(STORAGE_DIR, "logs", "pipeline.log")
+        if os.path.exists(log_path):
+            try:
+                with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                    lines = [l.strip() for l in f.readlines()[-tail:] if l.strip()]
+                    for l in lines:
+                        _recent_pipeline_logs.append(l)
+            except Exception:
+                pass
+
+    logs_list = list(_recent_pipeline_logs)
+    if tail and tail > 0:
+        logs_list = logs_list[-tail:]
+
+    return {
+        "is_running": _background_job_status["is_running"],
+        "current_task": _background_job_status["current_task"],
+        "last_run": _background_job_status["last_run"],
+        "logs": logs_list,
+        "count": len(logs_list),
+    }
+
+
+@app.post("/api/pipeline/logs/clear")
+def clear_pipeline_logs():
+    """Limpia el búfer en memoria de logs."""
+    _recent_pipeline_logs.clear()
+    return {"status": "ok", "message": "Logs en memoria limpiados."}
 
 
 def get_all_profile_paths() -> List[str]:
@@ -570,6 +660,12 @@ def find_profile_path(user_id_or_name: str) -> Optional[str]:
 def get_global_stats():
     """Genera estadísticas consolidadas a partir de la base de datos SQLite."""
     return repo.get_global_stats()
+
+
+@app.get("/api/stats/social-graph")
+def get_social_graph():
+    """Retorna la red de interacciones, afinidad y conexiones sociales entre usuarios."""
+    return repo.get_social_graph()
 
 
 # ==============================================================================

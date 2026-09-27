@@ -83,8 +83,22 @@ def sync_all(storage_dir: str, db_path: Optional[str] = None) -> Dict[str, Any]:
                 avatar_url = f"/api/users/{uid}/avatar" if has_avatar else None
                 has_voice = 1 if os.path.exists(os.path.join(clean_samples_dir, uid, "sample_clean_prompt.wav")) else 0
 
-                vocab_dict = dialect.get("vocabulary_frequencies", {}) or pdata.get("lexicon_frequency", {}) or {}
-                total_words = sum(vocab_dict.values())
+                lexicon_path = os.path.join(profiles_dir, uid, "lexicon.json")
+                if os.path.exists(lexicon_path):
+                    try:
+                        with open(lexicon_path, "r", encoding="utf-8") as lf:
+                            ldata = json.load(lf)
+                        vocab_dict = ldata.get("vocabulary", {}) or {}
+                        total_words = int(ldata.get("total_words_spoken", sum(vocab_dict.values())))
+                        total_unique_words = int(ldata.get("total_unique_words", len(vocab_dict)))
+                    except Exception:
+                        vocab_dict = dialect.get("vocabulary_frequencies", {}) or pdata.get("lexicon_frequency", {}) or {}
+                        total_words = sum(vocab_dict.values())
+                        total_unique_words = int(pdata.get("total_unique_words", 0)) or len(vocab_dict)
+                else:
+                    vocab_dict = dialect.get("vocabulary_frequencies", {}) or pdata.get("lexicon_frequency", {}) or {}
+                    total_words = sum(vocab_dict.values())
+                    total_unique_words = int(pdata.get("total_unique_words", 0)) or len(vocab_dict)
 
                 last_updated = pdata.get("last_updated")
 
@@ -95,9 +109,9 @@ def sync_all(storage_dir: str, db_path: Optional[str] = None) -> Dict[str, Any]:
                             user_id, username, display_name, nicknames,
                             primary_role, secondary_role, humor_type, cadence,
                             conflict_style, preferred_idioms, total_speaking_seconds,
-                            total_sessions_analyzed, total_words_spoken,
+                            total_sessions_analyzed, total_words_spoken, total_unique_words,
                             has_voice_sample, has_avatar, avatar_url, last_updated
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(user_id) DO UPDATE SET
                             username=excluded.username,
                             display_name=excluded.display_name,
@@ -111,6 +125,7 @@ def sync_all(storage_dir: str, db_path: Optional[str] = None) -> Dict[str, Any]:
                             total_speaking_seconds=excluded.total_speaking_seconds,
                             total_sessions_analyzed=excluded.total_sessions_analyzed,
                             total_words_spoken=excluded.total_words_spoken,
+                            total_unique_words=excluded.total_unique_words,
                             has_voice_sample=excluded.has_voice_sample,
                             has_avatar=excluded.has_avatar,
                             avatar_url=excluded.avatar_url,
@@ -119,7 +134,7 @@ def sync_all(storage_dir: str, db_path: Optional[str] = None) -> Dict[str, Any]:
                         uid, username, display_name, nicknames,
                         primary_role, secondary_role, humor_type, cadence,
                         conflict_style, preferred_idioms, speaking_sec,
-                        sessions_count, total_words,
+                        sessions_count, total_words, total_unique_words,
                         has_voice, has_avatar, avatar_url, last_updated
                     ))
 
@@ -187,6 +202,24 @@ def sync_all(storage_dir: str, db_path: Optional[str] = None) -> Dict[str, Any]:
                 # Verificar si ya está procesada (tiene transcript.json)
                 processed = 1 if os.path.exists(os.path.join(s_path, "transcript.json")) else 0
 
+                # Calcular estadísticas por usuario desde transcript.json si está disponible
+                user_stats = {}
+                transcript_file = os.path.join(s_path, "transcript.json")
+                if os.path.exists(transcript_file):
+                    try:
+                        with open(transcript_file, "r", encoding="utf-8") as tf:
+                            tdata = json.load(tf)
+                        for u in tdata.get("utterances", []):
+                            uid_ = str(u.get("user_id"))
+                            dur_ = float(u.get("duration", 0.0))
+                            words_ = len(u.get("text", "").split())
+                            if uid_ not in user_stats:
+                                user_stats[uid_] = {"sec": 0.0, "words": 0}
+                            user_stats[uid_]["sec"] += dur_
+                            user_stats[uid_]["words"] += words_
+                    except Exception:
+                        pass
+
                 with conn:
                     conn.execute("""
                         INSERT INTO sessions (
@@ -208,6 +241,32 @@ def sync_all(storage_dir: str, db_path: Optional[str] = None) -> Dict[str, Any]:
                         p_count,
                         processed
                     ))
+
+                    # Sincronizar participantes de la sesión
+                    participants_list = meta.get("participants", [])
+                    # Si no hay participantes en metadata pero sí en transcript
+                    if not participants_list and user_stats:
+                        participants_list = [{"user_id": uid_} for uid_ in user_stats.keys()]
+
+                    for p in participants_list:
+                        p_uid = str(p.get("user_id", "")).strip()
+                        if not p_uid:
+                            continue
+                        conn.execute("""
+                            INSERT OR IGNORE INTO users (user_id, username, display_name)
+                            VALUES (?, ?, ?)
+                        """, (p_uid, p.get("username") or p_uid, p.get("display_name") or p.get("username") or p_uid))
+
+                        st = user_stats.get(p_uid, {"sec": 0.0, "words": 0})
+                        conn.execute("""
+                            INSERT INTO session_participants (
+                                session_id, user_id, speaking_seconds, words_count
+                            ) VALUES (?, ?, ?, ?)
+                            ON CONFLICT(session_id, user_id) DO UPDATE SET
+                                speaking_seconds=excluded.speaking_seconds,
+                                words_count=excluded.words_count;
+                        """, (s_id, p_uid, round(st["sec"], 2), st["words"]))
+
                 sessions_synced += 1
 
     finally:

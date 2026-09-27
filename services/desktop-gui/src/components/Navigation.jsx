@@ -2,13 +2,15 @@ import React from 'react';
 import { 
   BarChart3, 
   Users, 
+  Share2,
   Cpu, 
   Volume2, 
   Menu, 
   X, 
   Radio, 
   HardDrive,
-  Clock 
+  Clock,
+  Terminal 
 } from 'lucide-react';
 
 export default function Navigation({ 
@@ -16,11 +18,13 @@ export default function Navigation({
   onSelectTab, 
   isMenuOpen, 
   onToggleMenu, 
-  status 
+  status,
+  onOpenLogs
 }) {
   const tabs = [
     { id: 'stats', label: 'Estadísticas Globales', icon: BarChart3 },
     { id: 'users', label: 'Amigos y Perfiles', icon: Users },
+    { id: 'social', label: 'Dinámica Social', icon: Share2 },
     { id: 'channels', label: 'Canales de Voz', icon: Radio },
     { id: 'hardware', label: 'Hardware y Vigilante', icon: Cpu },
     { id: 'tts', label: 'Estudio de Voz TTS', icon: Volume2 },
@@ -127,6 +131,23 @@ export default function Navigation({
               <span className="text-slate-500">VRAM:</span> {Math.round(status.hardware.gpu.vram_used_mb / 1024 * 10) / 10} / 12 GB
             </div>
           )}
+
+          {/* Botón Consola de Logs */}
+          <button
+            onClick={onOpenLogs}
+            className={`btn-tactile flex items-center space-x-1.5 px-2.5 py-1 rounded-xs border transition cursor-pointer ${
+              isBatchRunning
+                ? "bg-indigo-950 text-indigo-300 border-indigo-500 shadow-[0_0_12px_rgba(99,102,241,0.25)]"
+                : "bg-dark-850 hover:bg-dark-800 text-slate-300 border-dark-700"
+            }`}
+            title="Abrir monitor de logs del pipeline en tiempo real"
+          >
+            <Terminal size={13} className={isBatchRunning ? "text-indigo-400 animate-pulse" : "text-slate-400"} />
+            <span>Logs</span>
+            {isBatchRunning && (
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping ml-0.5" />
+            )}
+          </button>
         </div>
       </header>
 

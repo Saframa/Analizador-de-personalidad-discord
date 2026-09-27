@@ -161,13 +161,68 @@ def test_profile_synthesizer_lifecycle(sample_transcript, tmp_path):
     assert profile_2.total_sessions_analyzed == 2
     assert profile_2.total_speaking_seconds == 14.0
 
-    # Promedio matemático exacto: ((score_1 * 1) + 0.90) / 2
-    expected_openness = round(((eval_1.openness_score * 1) + 0.90) / 2, 3)
-    assert profile_2.big_five.openness.score == expected_openness
+    # Ponderación bayesiana: el rasgo evoluciona suavemente sin saltos bruscos
+    assert profile_2.big_five.openness.score > profile_1.big_five.openness.score
+    assert 0.0 <= profile_2.big_five.openness.score <= 1.0
 
     # Verificar que el perfil actualizado siga cumpliendo el JSON Schema
     data_2 = json.loads(profile_2.model_dump_json())
     jsonschema.validate(instance=data_2, schema=schema)
+
+
+def test_bayesian_bad_day_protection(sample_transcript, tmp_path):
+    """Verifica que un mal día (Neuroticismo = 0.95 en sesión 1) no sesgue la personalidad gracias al Prior Bayesiano."""
+    synthesizer = ProfileSynthesizer(storage_dir=str(tmp_path))
+    metrics = compute_user_metrics(sample_transcript, "user_marce")
+    profiler = GeminiProfiler(mock=True)
+
+    eval_bad_day = profiler.analyze_user_session(
+        transcript=sample_transcript,
+        target_user_id="user_marce",
+        target_username="saframa",
+        metrics=metrics,
+    ).model_copy(
+        update={
+            "neuroticism_score": 0.95,
+            "neuroticism_confidence": 0.85,
+            "agreeableness_score": 0.15,
+        }
+    )
+
+    # 1. Sesión 1 con mal día extremo
+    profile_1 = synthesizer.synthesize_profile(
+        user_id="user_marce",
+        username="saframa",
+        session_id="2026-09-25_00-00-18",
+        session_metrics=metrics,
+        evaluation=eval_bad_day,
+    )
+
+    # El neuroticismo NO debe estar en 0.95: el prior bayesiano (0.50) debe frenarlo fuertemente (< 0.60)
+    assert profile_1.big_five.neuroticism.score < 0.60
+    # La confianza en sesión 1 debe ser acotada (< 0.65)
+    assert profile_1.big_five.neuroticism.confidence <= 0.65
+
+    # 2. Sesión 2 con comportamiento habitual relajado (neuroticismo 0.35)
+    eval_normal = eval_bad_day.model_copy(
+        update={
+            "neuroticism_score": 0.35,
+            "neuroticism_confidence": 0.90,
+            "agreeableness_score": 0.70,
+        }
+    )
+
+    profile_2 = synthesizer.synthesize_profile(
+        user_id="user_marce",
+        username="saframa",
+        session_id="2026-09-25_01-00-00",
+        session_metrics=metrics,
+        evaluation=eval_normal,
+    )
+
+    # Debe descender hacia la normalidad
+    assert profile_2.big_five.neuroticism.score < profile_1.big_five.neuroticism.score
+    assert profile_2.big_five.neuroticism.confidence >= profile_1.big_five.neuroticism.confidence
 
 
 def test_adaptive_running_avg_longitudinal():

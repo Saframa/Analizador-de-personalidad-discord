@@ -35,6 +35,27 @@ from core.profiler.lexicon_manager import LexiconManager
 
 
 
+BAYESIAN_PRIOR_SCORE = 0.50
+BAYESIAN_PRIOR_WEIGHT = 2.0  # Inercia de sesiones virtuales neutras para evitar sesgo por 'mal día'
+
+
+def compute_session_weight(speaking_seconds: float, turn_count: int) -> float:
+    """
+    Calcula el factor de peso o representatividad de una sesión (de 0.20 a 1.20)
+    según el tiempo hablado y la cantidad de intervenciones.
+    Evita que intervenciones fugaces (< 15 seg) o días atípicos pesen lo mismo
+    que llamadas completas de 30 o 45 minutos.
+    """
+    if speaking_seconds <= 15.0 or turn_count <= 2:
+        return 0.25
+    elif speaking_seconds <= 60.0:
+        return 0.50
+    elif speaking_seconds <= 180.0:
+        return 0.80
+    else:
+        return round(min(1.20, 0.80 + (speaking_seconds / 600.0) * 0.40), 2)
+
+
 def running_avg(prev_val: float, new_val: float, n_prev: int, min_alpha: float = 0.05) -> float:
     """
     Calcula el promedio ponderado continuo adaptativo para seguimiento longitudinal (> 1 mes).
@@ -48,17 +69,74 @@ def running_avg(prev_val: float, new_val: float, n_prev: int, min_alpha: float =
     return round((1.0 - alpha) * prev_val + alpha * new_val, 3)
 
 
-def calculate_accumulated_confidence(prev_conf: float, new_conf: float, n_total: int) -> float:
+def calculate_accumulated_confidence(
+    prev_conf: float,
+    new_conf: float,
+    n_total: int,
+    session_weight: float = 1.0,
+) -> float:
     """
     Modela el incremento bayesiano de certeza conforme se acumulan sesiones (> 1 mes):
     Conf(N) satura asintóticamente hacia 0.99 conforme aumenta la muestra de datos observados.
     """
     if n_total <= 1:
         return round(new_conf, 3)
-    base = ((prev_conf * (n_total - 1)) + new_conf) / n_total
+    base = ((prev_conf * (n_total - 1)) + (new_conf * session_weight)) / (n_total - 1 + session_weight)
     # Bonificación por saturación empírica en muestreo longitudinal
-    saturation_boost = 0.12 * (1.0 - (0.90 ** (n_total - 1)))
-    return round(min(0.99, base + saturation_boost), 3)
+    saturation_boost = 0.12 * (1.0 - (0.88 ** (n_total - 1)))
+    return round(min(0.99, max(prev_conf, base + saturation_boost)), 3)
+
+
+def synthesize_trait_initial(
+    evaluation_score: float,
+    evaluation_confidence: float,
+    evidence_quotes: List[str],
+    session_id: str,
+    session_weight: float = 1.0,
+    prior_score: float = BAYESIAN_PRIOR_SCORE,
+    prior_weight: float = BAYESIAN_PRIOR_WEIGHT,
+) -> TraitEvaluation:
+    """
+    Inicializa un rasgo Big Five aplicando un Prior Bayesiano Neutro (shrinkage hacia 0.50)
+    con inercia previa para blindar al usuario ante 'malos días' o llamadas atípicas en su primera sesión.
+    """
+    effective_score = round(
+        ((prior_score * prior_weight) + (evaluation_score * session_weight)) / (prior_weight + session_weight),
+        3,
+    )
+    effective_conf = round(
+        min(0.65, (evaluation_confidence * session_weight) / (prior_weight + session_weight) + 0.15),
+        3,
+    )
+    quotes = merge_evidence_quotes([], evidence_quotes, session_id, max_quotes=10)
+    return TraitEvaluation(score=effective_score, confidence=effective_conf, evidence_quotes=quotes)
+
+
+def synthesize_trait_update(
+    prev_t: TraitEvaluation,
+    new_score: float,
+    new_conf: float,
+    new_quotes: List[str],
+    session_id: str,
+    n_prev: int,
+    session_weight: float = 1.0,
+    min_alpha: float = 0.05,
+    prior_inertia: float = BAYESIAN_PRIOR_WEIGHT,
+) -> TraitEvaluation:
+    """
+    Actualiza un rasgo Big Five aplicando una tasa de aprendizaje adaptativa ponderada por la sesión.
+    - Factor de aprendizaje: alpha = session_weight / (prior_inertia + n_prev + session_weight)
+    - Amortigua sesiones breves o desvíos extremos transitorios
+    - Garantiza plasticidad longitudinal a largo plazo con cota inferior min_alpha (5%)
+    """
+    effective_n = prior_inertia + n_prev
+    alpha = max(min_alpha, min(0.35, session_weight / (effective_n + session_weight)))
+    updated_score = round((1.0 - alpha) * prev_t.score + alpha * new_score, 3)
+    updated_conf = calculate_accumulated_confidence(
+        prev_t.confidence, new_conf, n_prev + 1, session_weight=session_weight
+    )
+    merged_quotes = merge_evidence_quotes(prev_t.evidence_quotes, new_quotes, session_id, max_quotes=10)
+    return TraitEvaluation(score=updated_score, confidence=updated_conf, evidence_quotes=merged_quotes)
 
 
 def merge_evidence_quotes(
@@ -318,33 +396,46 @@ class ProfileSynthesizer:
             "vocabulary": sorted_vocab,
         })
 
+        session_weight = compute_session_weight(session_metrics.total_speaking_seconds, session_metrics.turn_count)
+
         if existing is None:
             # Caso 1: Primera sesión analizada para este usuario (N = 0 -> N = 1)
+            # Se aplica Prior Bayesiano Neutro para evitar sesgo por 'mal día' en la primera sesión
             big_five = BigFiveTraits(
-                openness=TraitEvaluation(
-                    score=evaluation.openness_score,
-                    confidence=evaluation.openness_confidence,
-                    evidence_quotes=merge_evidence_quotes([], evaluation.openness_evidence, session_id),
+                openness=synthesize_trait_initial(
+                    evaluation.openness_score,
+                    evaluation.openness_confidence,
+                    evaluation.openness_evidence,
+                    session_id,
+                    session_weight=session_weight,
                 ),
-                conscientiousness=TraitEvaluation(
-                    score=evaluation.conscientiousness_score,
-                    confidence=evaluation.conscientiousness_confidence,
-                    evidence_quotes=merge_evidence_quotes([], evaluation.conscientiousness_evidence, session_id),
+                conscientiousness=synthesize_trait_initial(
+                    evaluation.conscientiousness_score,
+                    evaluation.conscientiousness_confidence,
+                    evaluation.conscientiousness_evidence,
+                    session_id,
+                    session_weight=session_weight,
                 ),
-                extraversion=TraitEvaluation(
-                    score=evaluation.extraversion_score,
-                    confidence=evaluation.extraversion_confidence,
-                    evidence_quotes=merge_evidence_quotes([], evaluation.extraversion_evidence, session_id),
+                extraversion=synthesize_trait_initial(
+                    evaluation.extraversion_score,
+                    evaluation.extraversion_confidence,
+                    evaluation.extraversion_evidence,
+                    session_id,
+                    session_weight=session_weight,
                 ),
-                agreeableness=TraitEvaluation(
-                    score=evaluation.agreeableness_score,
-                    confidence=evaluation.agreeableness_confidence,
-                    evidence_quotes=merge_evidence_quotes([], evaluation.agreeableness_evidence, session_id),
+                agreeableness=synthesize_trait_initial(
+                    evaluation.agreeableness_score,
+                    evaluation.agreeableness_confidence,
+                    evaluation.agreeableness_evidence,
+                    session_id,
+                    session_weight=session_weight,
                 ),
-                neuroticism=TraitEvaluation(
-                    score=evaluation.neuroticism_score,
-                    confidence=evaluation.neuroticism_confidence,
-                    evidence_quotes=merge_evidence_quotes([], evaluation.neuroticism_evidence, session_id),
+                neuroticism=synthesize_trait_initial(
+                    evaluation.neuroticism_score,
+                    evaluation.neuroticism_confidence,
+                    evaluation.neuroticism_evidence,
+                    session_id,
+                    session_weight=session_weight,
                 ),
             )
 
@@ -402,43 +493,52 @@ class ProfileSynthesizer:
             # Caso 2: Sesión N (actualización incremental continua)
             n_prev = existing.total_sessions_analyzed
 
-            # 1. Big Five ponderado con bonificación de confianza por acumulación
-            def update_trait(prev_t: TraitEvaluation, new_score: float, new_conf: float, new_quotes: List[str]):
-                score = running_avg(prev_t.score, new_score, n_prev)
-                conf = calculate_accumulated_confidence(prev_t.confidence, new_conf, n_prev + 1)
-                quotes = merge_evidence_quotes(prev_t.evidence_quotes, new_quotes, session_id, max_quotes=10)
-                return TraitEvaluation(score=score, confidence=conf, evidence_quotes=quotes)
-
+            # 1. Big Five ponderado con amortiguación bayesiana por sesión y saturación de certeza
             big_five = BigFiveTraits(
-                openness=update_trait(
+                openness=synthesize_trait_update(
                     existing.big_five.openness,
                     evaluation.openness_score,
                     evaluation.openness_confidence,
                     evaluation.openness_evidence,
+                    session_id,
+                    n_prev,
+                    session_weight=session_weight,
                 ),
-                conscientiousness=update_trait(
+                conscientiousness=synthesize_trait_update(
                     existing.big_five.conscientiousness,
                     evaluation.conscientiousness_score,
                     evaluation.conscientiousness_confidence,
                     evaluation.conscientiousness_evidence,
+                    session_id,
+                    n_prev,
+                    session_weight=session_weight,
                 ),
-                extraversion=update_trait(
+                extraversion=synthesize_trait_update(
                     existing.big_five.extraversion,
                     evaluation.extraversion_score,
                     evaluation.extraversion_confidence,
                     evaluation.extraversion_evidence,
+                    session_id,
+                    n_prev,
+                    session_weight=session_weight,
                 ),
-                agreeableness=update_trait(
+                agreeableness=synthesize_trait_update(
                     existing.big_five.agreeableness,
                     evaluation.agreeableness_score,
                     evaluation.agreeableness_confidence,
                     evaluation.agreeableness_evidence,
+                    session_id,
+                    n_prev,
+                    session_weight=session_weight,
                 ),
-                neuroticism=update_trait(
+                neuroticism=synthesize_trait_update(
                     existing.big_five.neuroticism,
                     evaluation.neuroticism_score,
                     evaluation.neuroticism_confidence,
                     evaluation.neuroticism_evidence,
+                    session_id,
+                    n_prev,
+                    session_weight=session_weight,
                 ),
             )
 

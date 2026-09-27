@@ -24,6 +24,8 @@ yarn-error.log*
 pnpm-debug.log*
 dist/
 build/
+.vite/
+**/.vite/
 
 # Almacenamiento Local de Grabaciones y Modelos (DATOS PESADOS Y PRIVADOS)
 # Se preserva la estructura de carpetas mediante .gitkeep

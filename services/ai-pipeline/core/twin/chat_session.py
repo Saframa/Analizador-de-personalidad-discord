@@ -162,8 +162,8 @@ class DigitalTwinChat:
         """
         username = self.profile.username
         role = self.profile.group_role.primary_role
-        slang = self.profile.dialect_markers.favorite_slang or ["salado", "flama", "posta"]
-        fillers = self.profile.dialect_markers.discourse_fillers or ["bo", "ta"]
+        slang = self.profile.dialect_markers.favorite_slang or ["bien", "tranqui"]
+        fillers = self.profile.dialect_markers.discourse_fillers or ["che", "bueno"]
 
         chosen_slang = random.choice(slang)
         chosen_filler = random.choice(fillers)

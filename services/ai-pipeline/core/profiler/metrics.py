@@ -27,7 +27,7 @@ SPANISH_GRAMMATICAL_STOPWORDS = {
 # Modismos, partículas orales y jerga rioplatense que NUNCA deben descartarse
 RIOPLATENSE_IDIOLECT_WHITELIST = {
     "bo", "ta", "che", "pa", "fa", "ah", "eh", "re", "mal", "posta", "salado",
-    "flama", "capaz", "mirá", "mira", "viste", "tenés", "tenes", "sos", "dale",
+    "capaz", "mirá", "mira", "viste", "tenés", "tenes", "sos", "dale",
     "pará", "para", "vamo", "vamos", "loco", "fiera", "perro", "amigo", "onda",
     "tipo", "literal", "claro", "manija", "pibe", "gurí", "guri", "vos", "de menos"
 }
@@ -74,6 +74,7 @@ class ConversationalMetrics:
         cadence: Literal["rapido", "pausado", "irregular", "moderado"],
         words_per_second: float,
         session_vocabulary: Optional[Dict[str, int]] = None,
+        unique_words: int = 0,
     ):
         self.user_id = user_id
         self.total_speaking_seconds = total_speaking_seconds
@@ -84,6 +85,7 @@ class ConversationalMetrics:
         self.cadence = cadence
         self.words_per_second = words_per_second
         self.session_vocabulary = session_vocabulary or {}
+        self.unique_words = unique_words
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -96,6 +98,7 @@ class ConversationalMetrics:
             "cadence": self.cadence,
             "words_per_second": round(self.words_per_second, 2),
             "session_vocabulary": self.session_vocabulary,
+            "unique_words": self.unique_words,
         }
 
 
@@ -180,6 +183,7 @@ def compute_user_metrics(
         cadence=cadence,
         words_per_second=overall_wps,
         session_vocabulary=session_vocab,
+        unique_words=len(session_vocab),
     )
 
 

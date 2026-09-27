@@ -48,6 +48,15 @@ storage/backups/*
 storage/logs/*
 !storage/logs/.gitkeep
 
+# Base de datos SQLite local
+storage/*.db
+storage/*.db-journal
+storage/*.db-wal
+storage/*.db-shm
+storage/*.sqlite
+storage/*.sqlite3
+storage/.*.json
+
 # Checkpoints y Pesos de Modelos Locales (Whisper, XTTS, F5-TTS)
 models/
 *.pt

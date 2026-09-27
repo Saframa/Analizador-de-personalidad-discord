@@ -43,6 +43,11 @@
       "minimum": 0,
       "description": "Total acumulado de segundos que el usuario ha hablado"
     },
+    "total_unique_words": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Cantidad total acumulada de palabras únicas pronunciadas por el usuario"
+    },
     "big_five": {
       "type": "object",
       "description": "Evaluación cuantitativa del modelo de los Cinco Grandes (Big Five)",

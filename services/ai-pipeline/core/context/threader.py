@@ -12,7 +12,7 @@ import networkx as nx
 from pydantic import BaseModel, Field
 
 from core.contracts.models import SessionTranscript, Utterance
-from core.context.topic_detector import TopicDetector
+from core.context.topic_detector import SPANISH_STOPWORDS, TopicDetector
 from core.user_manager.manager import UserManager
 
 
@@ -90,6 +90,7 @@ class DiscourseThreader:
         self.max_gap_seconds = max_gap_seconds
         self.min_connection_score = min_connection_score
         self.topic_detector = TopicDetector(top_n_keywords=5)
+        self.stopwords = set(SPANISH_STOPWORDS)
 
     def _get_user_aliases(self, user_id: str, username: str) -> Set[str]:
         """Obtiene todos los apodos, nombres y motes conocidos para un usuario."""
@@ -117,7 +118,7 @@ class DiscourseThreader:
     ) -> float:
         """
         Calcula la probabilidad de que `curr` sea una respuesta directa o reacción a `prev`.
-        Combina proximidad temporal, mención de nombres, marcadores Q&A y similitud léxica.
+        Combina proximidad temporal, mención de nombres, coherencia Q&A y similitud léxica sin stopwords.
         """
         delta_t = curr.start_time - prev.end_time
 
@@ -125,32 +126,53 @@ class DiscourseThreader:
         if delta_t > self.max_gap_seconds or delta_t < -3.0:
             return 0.0
 
-        # 1. Decaimiento Temporal Exponencial (w_time = 0.40)
-        # Cuanto más rápido responde, mayor la probabilidad
+        # 1. Decaimiento Temporal Exponencial (w_time = 0.35)
         if delta_t < 0:
             # Solapamiento / interrupción
             time_score = 0.90
         else:
             time_score = math.exp(-delta_t / 3.0)
 
-        # 2. Mención Directa de Nombre o Apodo (w_mention = 0.35)
+        # 2. Mención Directa de Nombre o Apodo (w_mention = 0.30)
         mention_score = 0.0
         curr_text_lower = curr.text.lower()
         for alias in prev_aliases:
-            # Búsqueda de palabra completa
             if re.search(r"\b" + re.escape(alias) + r"\b", curr_text_lower):
                 mention_score = 1.0
                 break
 
-        # 3. Marcador de Pregunta -> Respuesta (w_qa = 0.20)
-        qa_score = 0.0
+        # 3. Solapamiento Léxico sin Stopwords (w_lex = 0.20 + topic_boost)
+        tokens_prev = set(
+            w.lower()
+            for w in re.findall(r"[a-zA-ZáéíóúÁÉÍÓÚñÑ]{3,}", prev.text)
+            if w.lower() not in self.stopwords
+        )
+        tokens_curr = set(
+            w.lower()
+            for w in re.findall(r"[a-zA-ZáéíóúÁÉÍÓÚñÑ]{3,}", curr.text)
+            if w.lower() not in self.stopwords
+        )
+
+        lex_score = 0.0
+        if tokens_prev and tokens_curr:
+            inter = len(tokens_prev & tokens_curr)
+            overlap_coeff = inter / min(len(tokens_prev), len(tokens_curr))
+            jaccard = inter / len(tokens_prev | tokens_curr)
+            lex_score = min(1.0, 0.6 * overlap_coeff + 0.4 * (jaccard * 3.0) + (0.15 if inter >= 1 else 0.0))
+
+        # 4. Marcador de Pregunta -> Respuesta Coherente (w_qa = 0.15)
         prev_text = prev.text.strip()
         curr_text = curr.text.strip().lower()
 
         is_prev_question = (
             "?" in prev_text
             or "¿" in prev_text
-            or any(q in prev_text.lower() for q in ["qué", "cómo", "cuándo", "por qué", "viste", "sabés", "sabe"])
+            or any(q in prev_text.lower() for q in ["qué", "cómo", "cuándo", "por qué", "cuántas", "cuantas", "viste", "sabés", "sabe"])
+        )
+        is_curr_question = (
+            "?" in curr_text
+            or "¿" in curr_text
+            or any(q in curr_text for q in ["qué", "cómo", "cuándo", "por qué", "cuántas", "cuantas", "viste"])
         )
         is_curr_answer = (
             curr_text.startswith("sí")
@@ -162,33 +184,39 @@ class DiscourseThreader:
             or curr_text.startswith("es que")
             or curr_text.startswith("acá")
             or curr_text.startswith("aca")
+            or curr_text.startswith("yo ")
+            or curr_text.startswith("dale")
+            or curr_text.startswith("con ")
         )
-        if is_prev_question and is_curr_answer and prev.user_id != curr.user_id:
-            qa_score = 1.0
-        elif is_prev_question and prev.user_id != curr.user_id:
-            qa_score = 0.5
 
-        # 4. Solapamiento Léxico (w_lex = 0.10)
-        tokens_prev = set(w.lower() for w in re.findall(r"\w{3,}", prev.text))
-        tokens_curr = set(w.lower() for w in re.findall(r"\w{3,}", curr.text))
-        lex_score = 0.0
-        if tokens_prev and tokens_curr:
-            jaccard = len(tokens_prev & tokens_curr) / len(tokens_prev | tokens_curr)
-            lex_score = min(1.0, jaccard * 3.0)
+        qa_score = 0.0
+        if is_prev_question and prev.user_id != curr.user_id:
+            if is_curr_answer and not is_curr_question:
+                # Si responde directamente a la pregunta: premio alto si comparte léxico o es inmediata (<= 2.5s)
+                qa_score = 1.0 if (lex_score > 0.0 or delta_t <= 2.5) else 0.4
+            elif is_curr_question:
+                # Dos preguntas consecutivas solo se enlazan si comparten tema
+                qa_score = 0.5 if lex_score > 0.0 else 0.0
+            elif lex_score > 0.0:
+                qa_score = 0.4
 
-        # 5. Penalización si es el mismo hablante continuando (a menos que sea consecutivo inmediato)
+        # 5. Afinidad Tópica Destacada (Topic Boost)
+        topic_boost = 0.18 if lex_score >= 0.25 else (0.08 if lex_score > 0.0 else 0.0)
+
+        # 6. Continuación de Ráfagas del Mismo Hablante (Speech Bursts)
         same_speaker_penalty = 1.0
         if curr.user_id == prev.user_id:
-            if delta_t < 1.0:
-                same_speaker_penalty = 0.85
+            if delta_t < 2.0:
+                same_speaker_penalty = 0.90
             else:
                 same_speaker_penalty = 0.30
 
         total_score = (
-            0.40 * time_score
-            + 0.35 * mention_score
-            + 0.20 * qa_score
-            + 0.10 * lex_score
+            0.35 * time_score
+            + 0.30 * mention_score
+            + 0.15 * qa_score
+            + 0.20 * lex_score
+            + topic_boost
         ) * same_speaker_penalty
 
         return min(1.0, total_score)

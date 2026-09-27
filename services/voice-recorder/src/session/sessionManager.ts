@@ -57,8 +57,10 @@ export class SessionManager {
     const rawSessionsDir = path.join(config.STORAGE_DIR, 'raw_sessions');
     const sessionDir = path.join(rawSessionsDir, sessionId);
     const audioDir = path.join(sessionDir, 'audio');
-
     fs.mkdirSync(audioDir, { recursive: true });
+    try {
+      fs.writeFileSync(path.join(sessionDir, '.recording'), now.toISOString());
+    } catch {}
 
     this.currentSessionId = sessionId;
     this.currentSessionDir = sessionDir;
@@ -182,6 +184,14 @@ export class SessionManager {
 
     const metadataFilePath = path.join(sessionDir, 'session_metadata.json');
     const validatedMetadata = writeSessionMetadataAtomic(metadataFilePath, metadataPayload);
+
+    // Liberar lock de grabación activa
+    const recLock = path.join(sessionDir, '.recording');
+    if (fs.existsSync(recLock)) {
+      try {
+        fs.unlinkSync(recLock);
+      } catch {}
+    }
 
     console.log(`✅ [SessionManager] Metadata guardada atómicamente en: ${metadataFilePath}`);
 

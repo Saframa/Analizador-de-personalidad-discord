@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from typing import Any, List, Literal, Optional
 from pydantic import BaseModel, Field
@@ -63,10 +64,15 @@ class GeminiSessionEvaluation(BaseModel):
     primary_role: str = Field(..., min_length=1, description="Rol arquetípico (ej. 'El Instigador Cómico', 'El Conciliador')")
     role_description: str = Field(..., min_length=1)
     conflict_style: str = Field(..., min_length=1, description="Modo de afrontar desacuerdos o discusiones")
-
     rioplatense_frequency: float = Field(..., ge=0.0, le=1.0, description="Densidad de modismos de 0.0 a 1.0")
-    favorite_slang: List[str] = Field(default_factory=list)
-    discourse_fillers: List[str] = Field(default_factory=list)
+    favorite_slang: List[str] = Field(
+        default_factory=list,
+        description="Modismos o jerga que el usuario DIJO TEXTUALMENTE en sus turnos en este diálogo. Dejar lista vacía [] si el usuario no usó modismos. NUNCA inventar palabras ni atribuir jergas que no estén en la transcripción."
+    )
+    discourse_fillers: List[str] = Field(
+        default_factory=list,
+        description="Muletillas o conectores orales que el usuario USÓ REALMENTE en sus turnos. Dejar lista vacía [] si no usó muletillas. NUNCA inventar muletillas."
+    )
     recurring_topics: List[str] = Field(default_factory=list)
 
     # 👥 Afinidad y Dinámica Social
@@ -210,7 +216,7 @@ TRANSCRIPCIÓN Y CONTEXTO DISCURSIVO DE LA SESIÓN:
 {dialogue}
 
 REGLAS CRÍTICAS:
-1. Recuerda la calibración rioplatense (chicanas, 'bo', 'ta', 'salado').
+1. Recuerda la calibración rioplatense (chicanas afectuosas, ironía cómplice, horizontalidad grupal).
 2. Evalúa cómo interactúa y responde a otros interlocutores según el flujo conversacional.
 3. CADA rasgo del Big Five debe incluir citas textuales directas de las intervenciones de {target_username}.
 4. Si el usuario habló poco o no hay suficiente evidencia para un rasgo, pon confianza < 0.5 y score 0.5.
@@ -218,6 +224,7 @@ REGLAS CRÍTICAS:
 6. Lore grupal: detecta chistes internos (inside_jokes), referencias a entidades/personas externas y anécdotas compartidas.
 7. Disparadores: extrae situaciones de queja/tilteo y temas de hiperfoco apasionado.
 8. Iniciativa: define si es 'iniciador', 'seguidor' o 'neutro', y describe cambios de actitud nocturnos si aplica.
+9. Modismos y muletillas (favorite_slang / discourse_fillers): Extrae ÚNICAMENTE palabras o modismos que {target_username} haya pronunciado textualmente en esta llamada. Si el usuario no usó modismos específicos, devuelve listas vacías ([]). NUNCA asumas ni agregues modismos que el usuario no haya dicho.
 """
 
         # Reintentos exponenciales automáticos ante microcortes de red o rate-limits temporales
@@ -241,13 +248,19 @@ REGLAS CRÍTICAS:
                 err_str = str(e).lower()
                 is_quota = any(k in err_str for k in ["429", "resource_exhausted", "quota", "rate limit", "ratelimit"])
                 if is_quota:
-                    print(f"\n🦙 [Cuota de Gemini agotada ({e}). Delegando inmediatamente a LLaMA (Groq LLaMA 3.3)]...")
+                    try:
+                        print(f"\n🦙 [Cuota de Gemini agotada ({e}). Delegando inmediatamente a LLaMA (Groq LLaMA 3.3)]...")
+                    except Exception:
+                        pass
                     if self.llama_client and self.llama_client.is_available():
                         try:
                             return self._llama_evaluation(transcript, target_user_id, target_username, metrics, threads)
                         except Exception as llama_err:
                             logger.warning(f"Fallo en evaluación con LLaMA ({llama_err}).")
-                    print("   Usando análisis heurístico de respaldo.")
+                    try:
+                        print("   Usando análisis heurístico de respaldo.")
+                    except Exception:
+                        pass
                     return self._mock_evaluation(transcript, target_user_id, target_username, metrics)
 
                 if attempt < max_retries - 1:
@@ -302,11 +315,12 @@ TRANSCRIPCIÓN Y CONTEXTO DISCURSIVO DE LA SESIÓN:
 {dialogue}
 
 REGLAS CRÍTICAS:
-1. Recuerda la calibración rioplatense (chicanas afectuosas, 'bo', 'ta', 'salado', ironía cómplice).
+1. Recuerda la calibración rioplatense (chicanas afectuosas, ironía cómplice, horizontalidad grupal).
 2. CADA rasgo del Big Five debe incluir citas textuales directas tomadas de las intervenciones de {target_username}.
 3. Dinámica social: identifica a quién dirige chicanas (teasing_targets) y con quién muestra mayor afinidad (closest_friends).
 4. Si el usuario habló poco, asigna score 0.5 y confianza < 0.5.
 5. Devuelve solo el JSON válido que cumpla con el esquema.
+6. Modismos y muletillas: Extrae ÚNICAMENTE modismos que {target_username} haya dicho textualmente en esta llamada. Si no usó modismos o muletillas, deja favorite_slang y discourse_fillers vacías ([]). NUNCA inventes modismos.
 """
 
         raw_response = self.llama_client.chat(
@@ -373,10 +387,16 @@ REGLAS CRÍTICAS:
         first_quote = quotes[0]
         longest_quote = max(quotes, key=len)
 
-        # Detectar modismos rioplatenses
+        # Detectar modismos rioplatenses con límites de palabra estrictos (sin falsos positivos)
         full_text_lower = " ".join(quotes).lower()
-        found_fillers = [f for f in COMMON_DISCOURSE_FILLERS if f in full_text_lower]
-        found_slang = [s for s in COMMON_SLANG if s in full_text_lower]
+        found_fillers = [
+            f for f in COMMON_DISCOURSE_FILLERS
+            if re.search(r'(?<!\w)' + re.escape(f) + r'(?!\w)', full_text_lower)
+        ]
+        found_slang = [
+            s for s in COMMON_SLANG
+            if re.search(r'(?<!\w)' + re.escape(s) + r'(?!\w)', full_text_lower)
+        ]
 
         slang_count = len(found_slang) + len(found_fillers)
         rioplatense_density = round(min(1.0, slang_count / max(1, len(quotes))), 2)
@@ -404,11 +424,8 @@ REGLAS CRÍTICAS:
         # Identificar amigos e interlocutores en la llamada
         other_users = list({u.username for u in transcript.utterances if u.user_id != target_user_id})
         teasing_targets = [u for u in other_users if any(u.lower() in q.lower() for q in quotes)]
-        if not teasing_targets and other_users:
-            teasing_targets = [other_users[0]]
-
-        inside_jokes = ["dar flama", "clonar la voz a los pibes"] if ("flama" in full_text_lower or "clon" in full_text_lower) else []
-        external_entities = ["Discord", "Kevin"] if "kevin" in full_text_lower else ["Discord"]
+        inside_jokes = []
+        external_entities = ["Discord"]
         tilts = ["fallas de audio o lag", "cuando algo no funciona a la primera"] if ("rompió" in full_text_lower or "carajo" in full_text_lower) else []
         hyperfocus = ["inteligencia artificial y clonación", "proyectos de software"] if ("voz" in full_text_lower or "clon" in full_text_lower or "web" in full_text_lower) else ["tecnología"]
         initiative_level = "iniciador" if metrics.turn_count >= 6 else "seguidor"
@@ -435,9 +452,9 @@ REGLAS CRÍTICAS:
             primary_role=primary_role,
             role_description=role_desc,
             conflict_style="confrontación lúdica con chicanas amistosas",
-            rioplatense_frequency=rioplatense_density if rioplatense_density > 0 else 0.35,
-            favorite_slang=found_slang if found_slang else ["flama", "posta"],
-            discourse_fillers=found_fillers if found_fillers else ["bo", "ta"],
+            rioplatense_frequency=rioplatense_density if rioplatense_density > 0 else 0.0,
+            favorite_slang=found_slang,
+            discourse_fillers=found_fillers,
             recurring_topics=["pruebas y tecnología", "chicanas internas", "dinámica del grupo"],
             teasing_targets=teasing_targets,
             closest_friends=other_users,

@@ -21,6 +21,16 @@ from core.twin.compiler import (
 from core.twin.llama_client import LlamaClient
 
 
+def safe_print(msg: str) -> None:
+    try:
+        print(msg)
+    except Exception:
+        try:
+            print(msg.encode("ascii", errors="replace").decode("ascii"))
+        except Exception:
+            pass
+
+
 class DigitalTwinChat:
     def __init__(
         self,
@@ -86,7 +96,7 @@ class DigitalTwinChat:
                 ),
             )
         except Exception as e:
-            print(f"⚠️  Aviso: No se pudo conectar a Gemini API ({e}). Activando modo mock local.")
+            safe_print(f"⚠️  Aviso: No se pudo conectar a Gemini API ({e}). Activando modo mock local.")
             self.mock = True
 
     def send_message(self, user_message: str, max_retries: int = 3) -> str:
@@ -112,7 +122,7 @@ class DigitalTwinChat:
                         self.history.append({"role": "assistant", "text": reply})
                         return reply
                 except Exception as e:
-                    print(f"⚠️  [Error en LLaMA API: {e}]")
+                    safe_print(f"⚠️  [Error en LLaMA API: {e}]")
 
         # 2. Si no es mock y tenemos conexión Gemini
         last_error = None
@@ -129,7 +139,7 @@ class DigitalTwinChat:
         # 3. Fallback a LLaMA cuando Gemini falla o agota su cuota (429)
         if self.llama_client and self.llama_client.is_available():
             try:
-                print("\n🦙 [Gemini sin solicitudes: delegando respuesta a la API de LLaMA]...")
+                safe_print("\n🦙 [Gemini sin solicitudes: delegando respuesta a la API de LLaMA]...")
                 llama_reply = self.llama_client.chat(
                     system_prompt=self.system_prompt,
                     messages=self.history,
@@ -139,18 +149,18 @@ class DigitalTwinChat:
                     self.history.append({"role": "assistant", "text": llama_reply})
                     return llama_reply
             except Exception as llama_err:
-                print(f"⚠️  [Error en fallback LLaMA: {llama_err}]")
+                safe_print(f"⚠️  [Error en fallback LLaMA: {llama_err}]")
 
         # 4. Último recurso: modo offline preprogramado
         if last_error:
             if "RESOURCE_EXHAUSTED" in str(last_error):
-                print("\n⚠️  [Límite de API de Gemini alcanzado (429 Quota Exceeded)]")
-                print("   Configura tu GROQ_API_KEY gratuita en el archivo .env para usar LLaMA 3.3.")
-                print("   Usando réplica estática offline de respaldo temporalmente.")
+                safe_print("\n⚠️  [Límite de API de Gemini alcanzado (429 Quota Exceeded)]")
+                safe_print("   Configura tu GROQ_API_KEY gratuita en el archivo .env para usar LLaMA 3.3.")
+                safe_print("   Usando réplica estática offline de respaldo temporalmente.")
             else:
-                print(f"\n⚠️  [Error de Gemini API: {last_error}] Usando réplica estática de respaldo.")
+                safe_print(f"\n⚠️  [Error de Gemini API: {last_error}] Usando réplica estática de respaldo.")
         elif self.mock:
-            print("\n⚠️  [Modo Mock: Sin API Key de Gemini ni LLaMA configurada. Usando réplica estática.]")
+            safe_print("\n⚠️  [Modo Mock: Sin API Key de Gemini ni LLaMA configurada. Usando réplica estática.]")
 
         fallback = self._mock_response(clean_input)
         self.history.append({"role": "assistant", "text": fallback})

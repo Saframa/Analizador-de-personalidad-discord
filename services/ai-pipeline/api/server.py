@@ -10,6 +10,7 @@ import glob
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -50,7 +51,6 @@ if BASE_DIR not in sys.path:
 from collections import deque
 from core.contracts.models import UserProfile
 from core.twin.chat_session import DigitalTwinChat
-from core.tts.cloner import F5TTSVoiceCloner
 from core.db import sync_all, ProfilerRepository
 from core.session_reconciler import is_session_active
 
@@ -61,7 +61,7 @@ repo = ProfilerRepository(DB_PATH)
 
 # Instancias compartidas en memoria
 _chat_sessions: Dict[str, DigitalTwinChat] = {}
-_voice_cloner: Optional[F5TTSVoiceCloner] = None
+_voice_cloner: Optional[Any] = None
 _background_job_status: Dict[str, Any] = {
     "is_running": False,
     "current_task": None,
@@ -78,10 +78,13 @@ def _append_pipeline_log(text: str):
         _recent_pipeline_logs.append(f"[{ts}] {clean}")
 
 
-def get_voice_cloner() -> F5TTSVoiceCloner:
+def get_voice_cloner() -> Any:
+    """Carga diferida (lazy) del motor TTS para arranque instantáneo del backend (<1s)."""
     global _voice_cloner
     if _voice_cloner is None:
-        _voice_cloner = F5TTSVoiceCloner()
+        logger.info("Inicializando motor de síntesis de voz (TTS)...")
+        from core.tts.cloner import get_voice_cloner as _factory_get_voice_cloner
+        _voice_cloner = _factory_get_voice_cloner()
     return _voice_cloner
 
 
@@ -267,6 +270,29 @@ def get_daemons_status() -> Dict[str, Any]:
             elif watcher_running and not recorder_running:
                 next_processing_info["status_text"] = "Vigilante activo (Grabador pausado)"
 
+    watcher_live_file = os.path.join(STORAGE_DIR, ".pipeline_status.json")
+    is_watcher_processing = False
+    watcher_live_data = None
+    if os.path.exists(watcher_live_file):
+        try:
+            with open(watcher_live_file, "r", encoding="utf-8") as wf:
+                w_info = json.load(wf)
+            if time.time() - w_info.get("timestamp", 0) < 180 and w_info.get("is_running"):
+                is_watcher_processing = True
+                watcher_live_data = w_info
+        except Exception:
+            pass
+
+    is_busy = _background_job_status["is_running"] or is_watcher_processing
+    active_job = dict(_background_job_status)
+    if is_watcher_processing and not _background_job_status["is_running"]:
+        active_job["is_running"] = True
+        active_job["current_task"] = watcher_live_data.get("current_task")
+        active_job["session_id"] = watcher_live_data.get("session_id")
+        active_job["stage"] = watcher_live_data.get("stage")
+        active_job["progress_percent"] = watcher_live_data.get("progress_percent", 50)
+        active_job["trigger"] = "watcher"
+
     return {
         "recorder": {
             "active": recorder_running,
@@ -277,7 +303,8 @@ def get_daemons_status() -> Dict[str, Any]:
             "pid": watcher_pid,
         },
         "pending_sessions_count": pending_count,
-        "is_processing_batch": _background_job_status["is_running"],
+        "is_processing_batch": is_busy,
+        "active_job": active_job,
         "next_processing": next_processing_info,
     }
 
@@ -517,12 +544,21 @@ def toggle_watcher():
 def _run_batch_process():
     global _background_job_status
     _background_job_status["is_running"] = True
-    _background_job_status["current_task"] = "Iniciando procesamiento por lotes..."
+    _background_job_status["current_task"] = "Iniciando pipeline de IA en GPU..."
+    _background_job_status["stage"] = "init"
+    _background_job_status["session_id"] = None
+    _background_job_status["progress_percent"] = 5
+    _background_job_status["started_at"] = time.time()
+    _background_job_status["error"] = None
     _append_pipeline_log("🚀 [PIPELINE] Iniciando procesamiento por lotes en segundo plano...")
 
     logs_dir = os.path.join(STORAGE_DIR, "logs")
     os.makedirs(logs_dir, exist_ok=True)
     pipe_log_path = os.path.join(logs_dir, "pipeline.log")
+
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
 
     try:
         cmd = [sys.executable, "-u", "main.py", "process-all"]
@@ -532,25 +568,61 @@ def _run_batch_process():
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
             bufsize=1,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
 
-        with open(pipe_log_path, "a", encoding="utf-8") as f:
+        with open(pipe_log_path, "a", encoding="utf-8", errors="replace") as f:
             for line in proc.stdout:
                 clean_line = line.strip()
                 if clean_line:
                     _append_pipeline_log(clean_line)
                     f.write(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {clean_line}\n")
                     f.flush()
-                    if "PROCESANDO SESION:" in clean_line:
-                        _background_job_status["current_task"] = clean_line.replace("PROCESANDO SESION:", "").strip()
-                    elif "faster-whisper" in clean_line:
-                        _background_job_status["current_task"] = "Transcribiendo audio con faster-whisper (CUDA)..."
-                    elif "Silero VAD" in clean_line:
+
+                    m_sid = re.search(r'\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}', clean_line)
+                    if m_sid and ("PROCESANDO SESION:" in clean_line or "[1/5]" in clean_line):
+                        sid = m_sid.group(0)
+                        _background_job_status["session_id"] = sid
+                        _background_job_status["stage"] = "init"
+                        _background_job_status["current_task"] = f"Validando metadatos de sesión: {sid}"
+                        _background_job_status["progress_percent"] = 15
+                    elif "[2/5]" in clean_line or "Silero VAD" in clean_line:
+                        _background_job_status["stage"] = "vad"
                         _background_job_status["current_task"] = "Detectando intervalos de voz con Silero VAD..."
-                    elif "Gemini" in clean_line or "perfilado" in clean_line.lower():
-                        _background_job_status["current_task"] = "Generando síntesis de personalidad con Gemini..."
+                        _background_job_status["progress_percent"] = 30
+                    elif "[3/5]" in clean_line or "faster-whisper" in clean_line or "Transcribiendo a" in clean_line:
+                        _background_job_status["stage"] = "stt"
+                        if "Transcribiendo a" in clean_line:
+                            user_mention = clean_line.split("Transcribiendo a")[-1].strip()
+                            _background_job_status["current_task"] = f"Transcribiendo en CUDA a {user_mention}..."
+                        else:
+                            _background_job_status["current_task"] = "Transcribiendo audio con faster-whisper en CUDA..."
+                        _background_job_status["progress_percent"] = 60
+                    elif "[4/5]" in clean_line or "cronol" in clean_line.lower() or "solapamiento" in clean_line.lower():
+                        _background_job_status["stage"] = "overlap"
+                        _background_job_status["current_task"] = "Calculando dinámicas y solapamientos de habla (Contrato B)..."
+                        _background_job_status["progress_percent"] = 75
+                    elif "[5/5]" in clean_line or "curando muestras" in clean_line.lower():
+                        _background_job_status["stage"] = "curation"
+                        _background_job_status["current_task"] = "Curando muestras limpias de voz para clonación TTS..."
+                        _background_job_status["progress_percent"] = 85
+                    elif "perfil" in clean_line.lower() or "gemini" in clean_line.lower():
+                        _background_job_status["stage"] = "profiling"
+                        _background_job_status["current_task"] = "Sintetizando perfiles psicológicos con Gemini 2.5 Flash..."
+                        _background_job_status["progress_percent"] = 92
+                    elif "sqlite" in clean_line.lower() or "sincroniz" in clean_line.lower():
+                        _background_job_status["stage"] = "sync"
+                        _background_job_status["current_task"] = "Sincronizando base de datos SQLite..."
+                        _background_job_status["progress_percent"] = 97
+                    elif "COMPLETADA" in clean_line or "exitosamente" in clean_line.lower():
+                        _background_job_status["stage"] = "completed"
+                        _background_job_status["current_task"] = "¡Sesión procesada y sincronizada exitosamente!"
+                        _background_job_status["progress_percent"] = 100
+
         proc.wait()
         try:
             sync_all(STORAGE_DIR, DB_PATH)
@@ -558,12 +630,18 @@ def _run_batch_process():
             pass
         _background_job_status["last_run"] = {
             "success": proc.returncode == 0,
+            "exit_code": proc.returncode,
             "finished_at": time.time(),
         }
         if proc.returncode == 0:
-            _append_pipeline_log("✅ [PIPELINE] Procesamiento completado exitosamente.")
+            _append_pipeline_log("✅ [PIPELINE] Procesamiento por lotes finalizado exitosamente.")
+            _background_job_status["stage"] = "completed"
+            _background_job_status["current_task"] = "¡Lote completado con éxito!"
+            _background_job_status["progress_percent"] = 100
         else:
             _append_pipeline_log(f"⚠️ [PIPELINE] Finalizó con código de salida {proc.returncode}.")
+            _background_job_status["stage"] = "failed"
+            _background_job_status["error"] = f"Código de salida: {proc.returncode}"
     except Exception as e:
         _append_pipeline_log(f"🚨 [PIPELINE ERROR] {e}")
         _background_job_status["last_run"] = {
@@ -571,6 +649,8 @@ def _run_batch_process():
             "error": str(e),
             "finished_at": time.time(),
         }
+        _background_job_status["stage"] = "failed"
+        _background_job_status["error"] = str(e)
     finally:
         _background_job_status["is_running"] = False
         _background_job_status["current_task"] = None
@@ -601,6 +681,32 @@ def get_pipeline_logs(tail: int = 150):
             except Exception:
                 pass
 
+    watcher_live_file = os.path.join(STORAGE_DIR, ".pipeline_status.json")
+    if not _background_job_status["is_running"] and os.path.exists(watcher_live_file):
+        try:
+            with open(watcher_live_file, "r", encoding="utf-8") as wf:
+                w_info = json.load(wf)
+            if time.time() - w_info.get("timestamp", 0) < 180 and w_info.get("is_running"):
+                w_log_path = os.path.join(STORAGE_DIR, "logs", "watcher.log")
+                w_logs = []
+                if os.path.exists(w_log_path):
+                    with open(w_log_path, "r", encoding="utf-8", errors="replace") as wf_log:
+                        w_logs = [l.strip() for l in wf_log.readlines()[-tail:] if l.strip()]
+                return {
+                    "is_running": True,
+                    "current_task": w_info.get("current_task"),
+                    "session_id": w_info.get("session_id"),
+                    "stage": w_info.get("stage"),
+                    "progress_percent": w_info.get("progress_percent", 50),
+                    "started_at": w_info.get("timestamp"),
+                    "last_run": _background_job_status["last_run"],
+                    "logs": w_logs if w_logs else logs_list,
+                    "count": len(w_logs) if w_logs else len(logs_list),
+                    "trigger": "watcher",
+                }
+        except Exception:
+            pass
+
     logs_list = list(_recent_pipeline_logs)
     if tail and tail > 0:
         logs_list = logs_list[-tail:]
@@ -608,6 +714,10 @@ def get_pipeline_logs(tail: int = 150):
     return {
         "is_running": _background_job_status["is_running"],
         "current_task": _background_job_status["current_task"],
+        "session_id": _background_job_status.get("session_id"),
+        "stage": _background_job_status.get("stage"),
+        "progress_percent": _background_job_status.get("progress_percent", 0),
+        "started_at": _background_job_status.get("started_at"),
         "last_run": _background_job_status["last_run"],
         "logs": logs_list,
         "count": len(logs_list),
@@ -814,6 +924,8 @@ def send_chat_message(user_id: str, payload: ChatMessageRequest):
     return {
         "user_id": user_id,
         "reply": reply,
+        "response": reply,
+        "model_used": getattr(chat, "backend_used", payload.backend),
         "history": chat.history,
     }
 
@@ -838,7 +950,11 @@ class TTSRequest(BaseModel):
 
 @app.post("/api/tts/{user_id}")
 def synthesize_speech(user_id: str, payload: TTSRequest):
-    """Sintetiza una frase con la voz clonada del amigo usando F5-TTS."""
+    """Sintetiza una frase con la voz clonada del amigo usando VoiceStudio o F5-TTS."""
+    clean_text = (payload.text or "").strip()
+    if not clean_text:
+        raise HTTPException(status_code=400, detail="El texto a sintetizar no puede estar vacío.")
+
     cloner = get_voice_cloner()
     output_dir = os.path.join(STORAGE_DIR, "twin_outputs", user_id)
     os.makedirs(output_dir, exist_ok=True)
@@ -848,16 +964,26 @@ def synthesize_speech(user_id: str, payload: TTSRequest):
     try:
         wav_file = cloner.clone_for_user(
             user_id=user_id,
-            target_text=payload.text,
+            target_text=clean_text,
             base_storage_dir=STORAGE_DIR,
             output_path=out_path,
         )
         return FileResponse(wav_file, media_type="audio/wav")
     except Exception as e:
+        logger.error(f"Error en síntesis TTS para usuario {user_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error en síntesis TTS: {e}")
 
 
 if __name__ == "__main__":
     import uvicorn
-    import datetime
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
+    try:
+        uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
+    except OSError as e:
+        if getattr(e, "winerror", None) == 10048 or "10048" in str(e):
+            logger.critical("Puerto 8000 en uso por otro proceso o socket retenido por el sistema.")
+        else:
+            logger.critical(f"Error de socket al iniciar servidor: {e}")
+        sys.exit(1)
+    except Exception as e:
+        logger.critical(f"Error inesperado al iniciar servidor: {e}")
+        sys.exit(1)

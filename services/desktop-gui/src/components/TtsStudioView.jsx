@@ -15,7 +15,7 @@ const QUICK_PROMPTS = [
   "Che, ¿vamos a jugar al Rocket o te vas a seguir haciendo el distraído?"
 ];
 
-export default function TtsStudioView() {
+export default function TtsStudioView({ isBackendReady }) {
   const [users, setUsers] = useState([]);
   const [selectedUserId, setSelectedUserId] = useState('');
   const [inputText, setInputText] = useState(QUICK_PROMPTS[0]);
@@ -28,12 +28,12 @@ export default function TtsStudioView() {
     fetchUsers().then((data) => {
       const uList = Array.isArray(data) ? data : (data?.users || []);
       setUsers(uList);
-      if (uList.length > 0) {
+      if (uList.length > 0 && !selectedUserId) {
         const withVoice = uList.find((u) => u.has_voice_sample);
         setSelectedUserId(withVoice ? withVoice.user_id : uList[0].user_id);
       }
     }).catch(console.error);
-  }, []);
+  }, [isBackendReady]);
 
   const handleSynthesize = async () => {
     if (!selectedUserId || !inputText.trim()) return;

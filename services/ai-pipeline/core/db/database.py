@@ -49,6 +49,8 @@ def init_database(db_path: Optional[str] = None) -> None:
                     has_voice_sample INTEGER DEFAULT 0,
                     has_avatar INTEGER DEFAULT 0,
                     avatar_url TEXT,
+                    likes TEXT, -- JSON array de strings (gustos e intereses)
+                    dislikes TEXT, -- JSON array de strings (aversiones o disgustos)
                     last_updated TEXT
                 );
 
@@ -123,7 +125,7 @@ def init_database(db_path: Optional[str] = None) -> None:
     finally:
         conn.close()
 
-    # Migration: add total_unique_words column if DB already exists without it
+    # Migrations: add columns if DB already exists without them
     _conn2 = get_connection(db_path)
     try:
         _col_exists = _conn2.execute(
@@ -132,5 +134,19 @@ def init_database(db_path: Optional[str] = None) -> None:
         if not _col_exists:
             with _conn2:
                 _conn2.execute("ALTER TABLE users ADD COLUMN total_unique_words INTEGER DEFAULT 0")
+
+        _likes_exists = _conn2.execute(
+            "SELECT COUNT(*) FROM pragma_table_info('users') WHERE name='likes'"
+        ).fetchone()[0]
+        if not _likes_exists:
+            with _conn2:
+                _conn2.execute("ALTER TABLE users ADD COLUMN likes TEXT")
+
+        _dislikes_exists = _conn2.execute(
+            "SELECT COUNT(*) FROM pragma_table_info('users') WHERE name='dislikes'"
+        ).fetchone()[0]
+        if not _dislikes_exists:
+            with _conn2:
+                _conn2.execute("ALTER TABLE users ADD COLUMN dislikes TEXT")
     finally:
         _conn2.close()

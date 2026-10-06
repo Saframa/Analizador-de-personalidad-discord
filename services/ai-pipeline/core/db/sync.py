@@ -102,6 +102,12 @@ def sync_all(storage_dir: str, db_path: Optional[str] = None) -> Dict[str, Any]:
 
                 last_updated = pdata.get("last_updated")
 
+                prefs = pdata.get("preferences", {}) or {}
+                likes_list = prefs.get("likes", []) or []
+                dislikes_list = prefs.get("dislikes", []) or []
+                likes_json = json.dumps(likes_list, ensure_ascii=False)
+                dislikes_json = json.dumps(dislikes_list, ensure_ascii=False)
+
                 with conn:
                     # Upsert User
                     conn.execute("""
@@ -110,8 +116,8 @@ def sync_all(storage_dir: str, db_path: Optional[str] = None) -> Dict[str, Any]:
                             primary_role, secondary_role, humor_type, cadence,
                             conflict_style, preferred_idioms, total_speaking_seconds,
                             total_sessions_analyzed, total_words_spoken, total_unique_words,
-                            has_voice_sample, has_avatar, avatar_url, last_updated
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            has_voice_sample, has_avatar, avatar_url, likes, dislikes, last_updated
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(user_id) DO UPDATE SET
                             username=excluded.username,
                             display_name=excluded.display_name,
@@ -129,13 +135,15 @@ def sync_all(storage_dir: str, db_path: Optional[str] = None) -> Dict[str, Any]:
                             has_voice_sample=excluded.has_voice_sample,
                             has_avatar=excluded.has_avatar,
                             avatar_url=excluded.avatar_url,
+                            likes=excluded.likes,
+                            dislikes=excluded.dislikes,
                             last_updated=excluded.last_updated;
                     """, (
                         uid, username, display_name, nicknames,
                         primary_role, secondary_role, humor_type, cadence,
                         conflict_style, preferred_idioms, speaking_sec,
                         sessions_count, total_words, total_unique_words,
-                        has_voice, has_avatar, avatar_url, last_updated
+                        has_voice, has_avatar, avatar_url, likes_json, dislikes_json, last_updated
                     ))
 
                     # Upsert Big Five

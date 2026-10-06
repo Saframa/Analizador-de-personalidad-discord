@@ -17,6 +17,9 @@ if not exist "node_modules" (
     )
 )
 
+REM Intentar iniciar VoiceStudio en Docker de forma transparente
+docker start voicestudio >nul 2>nul
+
 echo [INFO] Iniciando aplicacion de escritorio (Electron + React + FastAPI)...
 call npm run dev
 

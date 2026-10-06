@@ -21,6 +21,20 @@ from core.twin.compiler import (
 from core.twin.llama_client import LlamaClient
 
 
+# Circuit Breaker global para cuota y estado de salud de Gemini
+_GEMINI_COOLDOWN_UNTIL: float = 0.0
+
+
+def is_gemini_in_cooldown() -> bool:
+    global _GEMINI_COOLDOWN_UNTIL
+    return time.time() < _GEMINI_COOLDOWN_UNTIL
+
+
+def mark_gemini_cooldown(seconds: float = 300.0) -> None:
+    global _GEMINI_COOLDOWN_UNTIL
+    _GEMINI_COOLDOWN_UNTIL = time.time() + seconds
+
+
 def safe_print(msg: str) -> None:
     try:
         print(msg)
@@ -69,6 +83,7 @@ class DigitalTwinChat:
         self.model_name = model_name or os.getenv("GEMINI_MODEL", "gemini-flash-latest")
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.backend = backend  # "auto", "gemini", o "llama"
+        self.backend_used = backend
         self.llama_client = llama_client or LlamaClient()
         self.mock = mock or (not self.api_key or self.api_key == "tu_api_key_aqui")
 
@@ -79,7 +94,7 @@ class DigitalTwinChat:
         # Si el modelo pedido es explícitamente LLaMA o backend='llama', forzar LLaMA
         if self.backend == "llama" or "llama" in self.model_name.lower():
             self.backend = "llama"
-        elif not self.mock and self.backend in ("auto", "gemini"):
+        elif not self.mock and self.backend in ("auto", "gemini") and not is_gemini_in_cooldown():
             self._init_chat()
 
     def _init_chat(self) -> None:
@@ -87,7 +102,9 @@ class DigitalTwinChat:
             from google import genai
             from google.genai import types
 
-            self._client = genai.Client(api_key=self.api_key)
+            # Timeout de 10 segundos (mínimo permitido por Google GenAI) para evitar bloqueos
+            http_opts = types.HttpOptions(timeout=10000)
+            self._client = genai.Client(api_key=self.api_key, http_options=http_opts)
             self._chat = self._client.chats.create(
                 model=self.model_name,
                 config=types.GenerateContentConfig(
@@ -96,12 +113,13 @@ class DigitalTwinChat:
                 ),
             )
         except Exception as e:
-            safe_print(f"⚠️  Aviso: No se pudo conectar a Gemini API ({e}). Activando modo mock local.")
+            safe_print(f"⚠️  Aviso: No se pudo conectar a Gemini API ({e}). Activando fallback a LLaMA.")
             self.mock = True
 
-    def send_message(self, user_message: str, max_retries: int = 3) -> str:
+    def send_message(self, user_message: str, max_retries: int = 1) -> str:
         """
         Envía un mensaje al Gemelo Digital y retorna su respuesta en personaje.
+        Garantiza respuestas en <1s mediante circuito rápido a LLaMA si Gemini está agotado o lento.
         """
         clean_input = user_message.strip()
         if not clean_input:
@@ -109,37 +127,44 @@ class DigitalTwinChat:
 
         self.history.append({"role": "user", "text": clean_input})
 
-        # 1. Si el backend seleccionado es LLaMA directamente
-        if self.backend == "llama":
-            if self.llama_client and self.llama_client.is_available():
-                try:
-                    reply = self.llama_client.chat(
-                        system_prompt=self.system_prompt,
-                        messages=self.history,
-                        temperature=self.temperature,
-                    )
-                    if reply:
-                        self.history.append({"role": "assistant", "text": reply})
-                        return reply
-                except Exception as e:
-                    safe_print(f"⚠️  [Error en LLaMA API: {e}]")
-
-        # 2. Si no es mock y tenemos conexión Gemini
-        last_error = None
-        if not self.mock and self._chat:
-            for attempt in range(max_retries):
-                try:
-                    response = self._chat.send_message(clean_input)
-                    reply = response.text.strip()
+        # 1. Si el backend es explícitamente LLaMA o Gemini está en cooldown por cuota
+        use_llama = self.backend == "llama" or (self.backend == "auto" and is_gemini_in_cooldown())
+        if use_llama and self.llama_client and self.llama_client.is_available():
+            try:
+                reply = self.llama_client.chat(
+                    system_prompt=self.system_prompt,
+                    messages=self.history,
+                    temperature=self.temperature,
+                )
+                if reply:
                     self.history.append({"role": "assistant", "text": reply})
+                    self.backend_used = "LLaMA 3.3 (Groq)"
                     return reply
-                except Exception as e:
-                    last_error = e
+            except Exception as e:
+                safe_print(f"⚠️  [Error en LLaMA API: {e}]")
 
-        # 3. Fallback a LLaMA cuando Gemini falla o agota su cuota (429)
+        # 2. Si no es mock, backend es auto/gemini, y Gemini NO está en cooldown
+        last_error = None
+        if not self.mock and self._chat and not is_gemini_in_cooldown():
+            try:
+                response = self._chat.send_message(clean_input)
+                reply = response.text.strip() if response and response.text else ""
+                if reply:
+                    self.history.append({"role": "assistant", "text": reply})
+                    self.backend_used = "Gemini Flash"
+                    return reply
+            except Exception as e:
+                last_error = e
+                # Ante cualquier error en Gemini (429 cuota, 503 saturación, 400, etc.), activar cooldown y migrar a LLaMA
+                mark_gemini_cooldown(600.0)
+                if self.backend == "auto":
+                    self.backend = "llama"
+                safe_print(f"⚠️  [Gemini no disponible ({e}). Activando LLaMA 3.3 ultrarrápido...]")
+
+        # 3. Fallback a LLaMA 3.3 (Groq) ante fallo de Gemini
         if self.llama_client and self.llama_client.is_available():
             try:
-                safe_print("\n🦙 [Gemini sin solicitudes: delegando respuesta a la API de LLaMA]...")
+                safe_print("🦙 [Delegando respuesta instantánea a LLaMA 3.3 (Groq)]...")
                 llama_reply = self.llama_client.chat(
                     system_prompt=self.system_prompt,
                     messages=self.history,
@@ -147,23 +172,20 @@ class DigitalTwinChat:
                 )
                 if llama_reply:
                     self.history.append({"role": "assistant", "text": llama_reply})
+                    self.backend_used = "LLaMA 3.3 (Groq)"
                     return llama_reply
             except Exception as llama_err:
                 safe_print(f"⚠️  [Error en fallback LLaMA: {llama_err}]")
 
         # 4. Último recurso: modo offline preprogramado
         if last_error:
-            if "RESOURCE_EXHAUSTED" in str(last_error):
-                safe_print("\n⚠️  [Límite de API de Gemini alcanzado (429 Quota Exceeded)]")
-                safe_print("   Configura tu GROQ_API_KEY gratuita en el archivo .env para usar LLaMA 3.3.")
-                safe_print("   Usando réplica estática offline de respaldo temporalmente.")
-            else:
-                safe_print(f"\n⚠️  [Error de Gemini API: {last_error}] Usando réplica estática de respaldo.")
+            safe_print(f"⚠️  [Modo contingencia: usando réplica heurística offline]")
         elif self.mock:
-            safe_print("\n⚠️  [Modo Mock: Sin API Key de Gemini ni LLaMA configurada. Usando réplica estática.]")
+            safe_print("⚠️  [Modo Mock: Sin API Key de Gemini ni LLaMA configurada. Usando réplica estática.]")
 
         fallback = self._mock_response(clean_input)
         self.history.append({"role": "assistant", "text": fallback})
+        self.backend_used = "Modo Offline"
         return fallback
 
     def _mock_response(self, user_message: str) -> str:

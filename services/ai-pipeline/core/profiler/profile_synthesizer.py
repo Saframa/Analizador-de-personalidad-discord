@@ -27,6 +27,7 @@ from core.contracts.models import (
     SocialDynamics,
     TemporalPatterns,
     TraitEvaluation,
+    UserPreferences,
     UserProfile,
 )
 from core.profiler.gemini_analyzer import GeminiSessionEvaluation
@@ -332,6 +333,36 @@ def synthesize_temporal_patterns(
     )
 
 
+def synthesize_preferences(
+    prev_preferences: Optional[UserPreferences],
+    evaluation: GeminiSessionEvaluation,
+) -> UserPreferences:
+    """
+    Sintetiza de forma acumulativa y longitudinal los gustos (likes) y aversiones (dislikes).
+    Elimina contradicciones si una nueva evaluación invierte el sentimiento hacia un ítem.
+    """
+    prev_likes = prev_preferences.likes if prev_preferences else []
+    prev_dislikes = prev_preferences.dislikes if prev_preferences else []
+
+    new_likes = getattr(evaluation, "likes", []) or []
+    new_dislikes = getattr(evaluation, "dislikes", []) or []
+
+    merged_likes = merge_unique_strings(prev_likes, new_likes, max_items=25)
+    merged_dislikes = merge_unique_strings(prev_dislikes, new_dislikes, max_items=25)
+
+    # Si un nuevo gusto explícito contradice uno anterior, priorizar lo más reciente
+    new_likes_lower = {l.lower() for l in new_likes}
+    new_dislikes_lower = {d.lower() for d in new_dislikes}
+
+    final_likes = [l for l in merged_likes if l.lower() not in new_dislikes_lower]
+    final_dislikes = [d for d in merged_dislikes if d.lower() not in new_likes_lower]
+
+    return UserPreferences(
+        likes=final_likes,
+        dislikes=final_dislikes,
+    )
+
+
 class ProfileSynthesizer:
     def __init__(self, storage_dir: str):
         self.storage_dir = os.path.abspath(storage_dir)
@@ -469,6 +500,7 @@ class ProfileSynthesizer:
             emot_triggers = synthesize_emotional_triggers(None, evaluation)
             activity_init = synthesize_activity_initiative(None, evaluation)
             temp_patterns = synthesize_temporal_patterns(None, evaluation, social_temporal_metrics)
+            preferences = synthesize_preferences(None, evaluation)
 
             profile = UserProfile(
                 version="1.0.0",
@@ -488,6 +520,7 @@ class ProfileSynthesizer:
                 emotional_triggers=emot_triggers,
                 activity_initiative=activity_init,
                 temporal_patterns=temp_patterns,
+                preferences=preferences,
             )
         else:
             # Caso 2: Sesión N (actualización incremental continua)
@@ -586,6 +619,7 @@ class ProfileSynthesizer:
             emot_triggers = synthesize_emotional_triggers(existing.emotional_triggers, evaluation)
             activity_init = synthesize_activity_initiative(existing.activity_initiative, evaluation)
             temp_patterns = synthesize_temporal_patterns(existing.temporal_patterns, evaluation, social_temporal_metrics)
+            preferences = synthesize_preferences(getattr(existing, "preferences", None), evaluation)
 
             profile = UserProfile(
                 version="1.0.0",
@@ -608,6 +642,7 @@ class ProfileSynthesizer:
                 emotional_triggers=emot_triggers,
                 activity_initiative=activity_init,
                 temporal_patterns=temp_patterns,
+                preferences=preferences,
             )
 
         # Guardado atómico en storage/profiles/<user_id>/profile.json

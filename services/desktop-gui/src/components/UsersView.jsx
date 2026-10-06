@@ -12,13 +12,13 @@ import {
 } from 'lucide-react';
 import { fetchUsers } from '../api';
 
-export default function UsersView({ onSelectUser, onOpenChat }) {
+export default function UsersView({ onSelectUser, onOpenChat, isBackendReady }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
 
-  const loadUsers = async () => {
+  const loadUsers = async (retryCount = 0) => {
     try {
       setLoading(true);
       setError(null);
@@ -26,7 +26,11 @@ export default function UsersView({ onSelectUser, onOpenChat }) {
       const list = Array.isArray(data) ? data : (data.users || []);
       setUsers(list);
     } catch (err) {
-      setError(err.message);
+      if (retryCount < 2) {
+        setTimeout(() => loadUsers(retryCount + 1), 1000);
+      } else {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -34,7 +38,7 @@ export default function UsersView({ onSelectUser, onOpenChat }) {
 
   useEffect(() => {
     loadUsers();
-  }, []);
+  }, [isBackendReady]);
 
   const filteredUsers = users.filter((u) => {
     const q = search.toLowerCase();

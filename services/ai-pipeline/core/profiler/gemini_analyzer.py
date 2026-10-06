@@ -96,6 +96,16 @@ class GeminiSessionEvaluation(BaseModel):
     # 🕒 Comportamiento Temporal / Nocturno
     late_night_attitude: Optional[str] = Field(None, description="Comportamiento o cambio de tono si la sesión transcurre tarde o de madrugada")
 
+    # ❤️ Gustos y Disgustos explícitos (Likes & Dislikes)
+    likes: List[str] = Field(
+        default_factory=list,
+        description="Cosas, temas, series, animes, juegos, comidas o actividades que el usuario DIJO EXPLÍCITAMENTE que le gustan, disfruta o ama (ej. 'cómo me gusta Bleach' -> 'Bleach'). Extraer únicamente entidades claras y sustentadas textualmente en la llamada."
+    )
+    dislikes: List[str] = Field(
+        default_factory=list,
+        description="Cosas, temas o actividades que el usuario DIJO EXPLÍCITAMENTE que NO le gustan, le desagradan, odia o le aburren (ej. 'no me gusta nada X' -> 'X', 'odio madrugar' -> 'madrugar'). Extraer únicamente lo sustentado textualmente."
+    )
+
 
 class GeminiProfiler:
     def __init__(
@@ -225,6 +235,13 @@ REGLAS CRÍTICAS:
 7. Disparadores: extrae situaciones de queja/tilteo y temas de hiperfoco apasionado.
 8. Iniciativa: define si es 'iniciador', 'seguidor' o 'neutro', y describe cambios de actitud nocturnos si aplica.
 9. Modismos y muletillas (favorite_slang / discourse_fillers): Extrae ÚNICAMENTE palabras o modismos que {target_username} haya pronunciado textualmente en esta llamada. Si el usuario no usó modismos específicos, devuelve listas vacías ([]). NUNCA asumas ni agregues modismos que el usuario no haya dicho.
+10. GUSTOS Y DISGUSTOS EXPLÍCITOS (likes y dislikes): Presta ESPECIAL ATENCIÓN a cuando el usuario habla de cosas que le gustan o que le desagradan:
+    - Si dice "cómo me gusta Bleach", "me encanta X", "amo X", "qué bueno que está X", "re banco X", "soy fanático de X": extrae 'Bleach' / 'X' en la lista 'likes'.
+    - Si dice "no me gusta X", "odio X", "no me banco X", "qué embole X", "me da asco X", "no soporto X": extrae 'X' en la lista 'dislikes'.
+    - Extrae el nombre limpio y específico del anime, juego, comida, obra, tema o actividad (ej. 'Bleach', 'Rocket League', 'madrugar').
+11. ⚠️ PROHIBICIÓN ESTRICTA DE ALUCINAR TEMAS DE COMPUTACIÓN / PROGRAMACIÓN / INGENIERÍA:
+    - NUNCA asumas que los participantes estudian o trabajan en computación, programación o ingeniería de software a menos que lo hayan dicho explícitamente con sus palabras (ej. "estoy programando en C++").
+    - Si están jugando, estudiando para un examen (física, matemáticas, etc.), charlando de la vida, anime o series, registra SUS TEMAS REALES. NUNCA agregues "proyectos de software", "tecnología", "inteligencia artificial" ni "código" a hyperfocus_topics o tilts si no fueron mencionados textualmente.
 """
 
         # Reintentos exponenciales automáticos ante microcortes de red o rate-limits temporales
@@ -321,6 +338,8 @@ REGLAS CRÍTICAS:
 4. Si el usuario habló poco, asigna score 0.5 y confianza < 0.5.
 5. Devuelve solo el JSON válido que cumpla con el esquema.
 6. Modismos y muletillas: Extrae ÚNICAMENTE modismos que {target_username} haya dicho textualmente en esta llamada. Si no usó modismos o muletillas, deja favorite_slang y discourse_fillers vacías ([]). NUNCA inventes modismos.
+7. GUSTOS Y DISGUSTOS EXPLÍCITOS (likes y dislikes): Extrae en 'likes' cosas que el usuario dijo explícitamente que le gustan o disfruta (ej. 'Bleach', 'Rocket League'), y en 'dislikes' cosas que dijo que no le gustan o le aburren.
+8. ⚠️ NO ALUCINAR INFORMÁTICA/CÓDIGO: NUNCA asumas que el usuario programa o trabaja en tecnología a menos que lo haya dicho textualmente. Si no lo dijo, NO inventes 'proyectos de software' ni 'tecnología'.
 """
 
         raw_response = self.llama_client.chat(
@@ -379,7 +398,7 @@ REGLAS CRÍTICAS:
                 external_entities=[], notable_anecdotes=[], tilts=[],
                 hyperfocus_topics=[], initiative_level="neutro",
                 proposes_activities=False, typical_proposals=[],
-                late_night_attitude=None,
+                late_night_attitude=None, likes=[], dislikes=[],
             )
 
         # Recolectar citas textuales
@@ -427,10 +446,47 @@ REGLAS CRÍTICAS:
         inside_jokes = []
         external_entities = ["Discord"]
         tilts = ["fallas de audio o lag", "cuando algo no funciona a la primera"] if ("rompió" in full_text_lower or "carajo" in full_text_lower) else []
-        hyperfocus = ["inteligencia artificial y clonación", "proyectos de software"] if ("voz" in full_text_lower or "clon" in full_text_lower or "web" in full_text_lower) else ["tecnología"]
+        
+        # Temas de hiperfoco genuinos (sin alucinar tecnología por defecto)
+        hyperfocus = []
+        if any(w in full_text_lower for w in ["anime", "manga", "bleach", "naruto", "one piece", "jujutsu"]):
+            hyperfocus.append("anime y series")
+        if any(w in full_text_lower for w in ["física", "fisica", "matemática", "matematica", "parcial", "cálculo", "calculo"]):
+            hyperfocus.append("ciencias y exámenes universitarios")
+        if any(w in full_text_lower for w in ["rocket", "gta", "counter", "cs", "valorant", "fifa", "lol"]):
+            hyperfocus.append("videojuegos")
+        if ("voz" in full_text_lower or "clon" in full_text_lower) and "audio" in full_text_lower:
+            hyperfocus.append("procesamiento de audio")
+
         initiative_level = "iniciador" if metrics.turn_count >= 6 else "seguidor"
         proposes_activities = metrics.turn_count >= 6
-        typical_proposals = ["probar features nuevas", "jugar unas partidas"] if proposes_activities else []
+        typical_proposals = ["jugar unas partidas", "probar cosas nuevas"] if proposes_activities else []
+
+        # Detección heurística de gustos y disgustos explícitos en el habla del usuario
+        detected_likes = []
+        detected_dislikes = []
+        like_patterns = [
+            r"(?:c[oó]mo\s+me\s+gusta|me\s+gusta\s+mucho|me\s+gusta|me\s+encanta|amo|re\s+banco|qu[eé]\s+bueno\s+est[aá]|soy\s+fan[aá]tico\s+de)\s+([a-zA-Z0-9áéíóúñüÁÉÍÓÚÑÜ\s]{2,30}?)(?:[\.,!\?]|(?:\s+(?:pero|aunque|y|o|adem[aá]s)\b)|$)",
+        ]
+        dislike_patterns = [
+            r"(?:no\s+me\s+gusta\s+nada|no\s+me\s+gusta|odio|no\s+me\s+banco|qu[eé]\s+embole|me\s+da\s+asco|no\s+soporto|me\s+tiene\s+podrido)\s+([a-zA-Z0-9áéíóúñüÁÉÍÓÚÑÜ\s]{2,30}?)(?:[\.,!\?]|(?:\s+(?:pero|aunque|y|o|adem[aá]s)\b)|$)",
+        ]
+
+        for q in quotes:
+            for pat in like_patterns:
+                m = re.search(pat, q, re.IGNORECASE)
+                if m:
+                    item = m.group(1).strip()
+                    item = re.sub(r'^(el|la|los|las|un|una|unos|unas|este|esta|ese|esa|de|que)\s+', '', item, flags=re.IGNORECASE).strip()
+                    if len(item) >= 3 and item.lower() not in [l.lower() for l in detected_likes]:
+                        detected_likes.append(item.capitalize())
+            for pat in dislike_patterns:
+                m = re.search(pat, q, re.IGNORECASE)
+                if m:
+                    item = m.group(1).strip()
+                    item = re.sub(r'^(el|la|los|las|un|una|unos|unas|este|esta|ese|esa|de|que)\s+', '', item, flags=re.IGNORECASE).strip()
+                    if len(item) >= 3 and item.lower() not in [d.lower() for d in detected_dislikes]:
+                        detected_dislikes.append(item.capitalize())
 
         return GeminiSessionEvaluation(
             openness_score=round(openness, 2),
@@ -455,7 +511,7 @@ REGLAS CRÍTICAS:
             rioplatense_frequency=rioplatense_density if rioplatense_density > 0 else 0.0,
             favorite_slang=found_slang,
             discourse_fillers=found_fillers,
-            recurring_topics=["pruebas y tecnología", "chicanas internas", "dinámica del grupo"],
+            recurring_topics=["chicanas internas", "dinámica del grupo"],
             teasing_targets=teasing_targets,
             closest_friends=other_users,
             inside_jokes=inside_jokes,
@@ -467,4 +523,6 @@ REGLAS CRÍTICAS:
             proposes_activities=proposes_activities,
             typical_proposals=typical_proposals,
             late_night_attitude="tono relajado y de confianza con chicanas amistosas",
+            likes=detected_likes,
+            dislikes=detected_dislikes,
         )

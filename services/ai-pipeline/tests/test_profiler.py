@@ -436,3 +436,65 @@ def test_profile_synthesizer_vocabulary_accumulation(tmp_path):
     assert p2.dialect_markers.vocabulary_frequencies["salado"] == 2
     assert p2.dialect_markers.vocabulary_frequencies["flama"] == 1
 
+
+def test_gemini_profiler_likes_dislikes_mock_extraction():
+    """Verifica que el profiler extraiga gustos y aversiones explícitas de las intervenciones del usuario."""
+    profiler = GeminiProfiler(mock=True)
+    transcript = SessionTranscript(
+        version="1.0.0",
+        session_id="2026-09-25_00-00-00",
+        processed_at=datetime.now(timezone.utc),
+        model="faster-whisper/medium",
+        utterances=[
+            Utterance(id=1, user_id="u1", username="test", start_time=0, end_time=3, duration=3, text="Fa boludo, cómo me gusta Bleach posta.", confidence=0.9),
+            Utterance(id=2, user_id="u1", username="test", start_time=4, end_time=7, duration=3, text="La verdad odio madrugar con frío.", confidence=0.9),
+        ]
+    )
+    metrics = compute_user_metrics(transcript, "u1")
+    eval_res = profiler.analyze_user_session(transcript, "u1", "test", metrics)
+
+    assert "Bleach" in eval_res.likes or any("bleach" in l.lower() for l in eval_res.likes)
+    assert any("madrugar" in d.lower() for d in eval_res.dislikes)
+
+
+def test_profile_synthesizer_preferences_accumulation(tmp_path):
+    """Verifica la persistencia y acumulación incremental de gustos y disgustos entre sesiones."""
+    synthesizer = ProfileSynthesizer(storage_dir=str(tmp_path))
+    profiler = GeminiProfiler(mock=True)
+
+    t1 = SessionTranscript(
+        version="1.0.0",
+        session_id="2026-09-25_00-00-00",
+        processed_at=datetime.now(timezone.utc),
+        model="faster-whisper/medium",
+        utterances=[
+            Utterance(id=1, user_id="u1", username="test", start_time=0, end_time=2, duration=2, text="cómo me gusta Bleach", confidence=0.9)
+        ]
+    )
+    m1 = compute_user_metrics(t1, "u1")
+    eval1 = profiler.analyze_user_session(t1, "u1", "test", m1)
+    p1 = synthesizer.synthesize_profile("u1", "test", "2026-09-25_00-00-00", m1, eval1)
+
+    assert any("bleach" in l.lower() for l in p1.preferences.likes)
+
+    # Sesión 2 con un gusto nuevo y una aversión
+    t2 = SessionTranscript(
+        version="1.0.0",
+        session_id="2026-09-25_01-00-00",
+        processed_at=datetime.now(timezone.utc),
+        model="faster-whisper/medium",
+        utterances=[
+            Utterance(id=1, user_id="u1", username="test", start_time=0, end_time=2, duration=2, text="me encanta Rocket League pero no me gusta la sopa de verduras", confidence=0.9)
+        ]
+    )
+    m2 = compute_user_metrics(t2, "u1")
+    eval2 = profiler.analyze_user_session(t2, "u1", "test", m2)
+    p2 = synthesizer.synthesize_profile("u1", "test", "2026-09-25_01-00-00", m2, eval2)
+
+    # Debe conservar Bleach y haber agregado Rocket League
+    all_likes_lower = [l.lower() for l in p2.preferences.likes]
+    assert any("bleach" in l for l in all_likes_lower)
+    assert any("rocket league" in l for l in all_likes_lower)
+    assert any("sopa" in d.lower() for d in p2.preferences.dislikes)
+
+

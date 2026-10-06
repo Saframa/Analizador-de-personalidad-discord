@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { fetchDiscordChannels, joinDiscordChannel, leaveDiscordChannel } from '../api';
 
-export default function VoiceChannelsView() {
+export default function VoiceChannelsView({ isBackendReady }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -73,10 +73,17 @@ export default function VoiceChannelsView() {
       loadChannels(false);
     }, 3500);
     return () => clearInterval(interval);
-  }, []);
+  }, [isBackendReady]);
 
   const handleJoin = async (channel) => {
     playTactileClick();
+    if (!channel.meetsConditions || (channel.humanCount || 0) < minUsersRequired) {
+      setFeedbackMessage({
+        type: 'error',
+        text: `No se puede unir a "${channel.name}": se requieren al menos ${minUsersRequired} personas en el canal (actualmente hay ${channel.humanCount || 0}).`
+      });
+      return;
+    }
     setLoadingAction(channel.id);
     setFeedbackMessage(null);
     try {
@@ -300,14 +307,14 @@ export default function VoiceChannelsView() {
         {/* Criterio de Activación */}
         <div className="p-3.5 bg-dark-900 border border-dark-750 rounded-xs flex flex-col justify-between">
           <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-            <span>Criterio de Auto-grabado</span>
+            <span>Condición para Unirse</span>
             <Info size={14} className="text-indigo-400" />
           </div>
           <div className="text-sm font-semibold text-indigo-300">
-            ≥ {minUsersRequired} {minUsersRequired === 1 ? 'humano' : 'humanos'}
+            ≥ {minUsersRequired} personas
           </div>
           <div className="text-[11px] text-slate-500 mt-1">
-            Configurado en MIN_USERS_TO_RECORD
+            Requisito obligatorio (auto y manual)
           </div>
         </div>
       </div>
@@ -472,11 +479,12 @@ export default function VoiceChannelsView() {
                                 ) : meets ? (
                                   <span className="shrink-0 px-2 py-0.5 rounded-xs text-[10px] font-semibold bg-emerald-950/60 border border-emerald-800/60 text-emerald-300 flex items-center gap-1">
                                     <CheckCircle2 size={11} />
-                                    Cumple
+                                    Cumple ({channel.humanCount})
                                   </span>
-                                ) : channel.humanCount > 0 ? (
-                                  <span className="shrink-0 px-2 py-0.5 rounded-xs text-[10px] font-medium bg-cyan-950/40 border border-cyan-800/50 text-cyan-300">
-                                    {channel.humanCount} {channel.humanCount === 1 ? 'persona' : 'personas'}
+                                ) : channel.humanCount === 1 ? (
+                                  <span className="shrink-0 px-2 py-0.5 rounded-xs text-[10px] font-medium bg-amber-950/40 border border-amber-800/50 text-amber-300 flex items-center gap-1">
+                                    <Users size={10} />
+                                    1 persona (falta 1)
                                   </span>
                                 ) : (
                                   <span className="shrink-0 px-2 py-0.5 rounded-xs text-[10px] font-normal bg-dark-800 border border-dark-700 text-slate-500">
@@ -586,24 +594,19 @@ export default function VoiceChannelsView() {
                                 </button>
                               ) : (
                                 <button
-                                  onClick={() => handleJoin(channel)}
-                                  disabled={isLoading || !botActive}
-                                  className="w-full btn-secondary py-1.5 px-3 rounded-xs text-xs flex items-center justify-center space-x-1.5 hover:text-slate-100"
+                                  disabled
+                                  className="w-full btn-secondary py-1.5 px-3 rounded-xs text-xs flex items-center justify-center space-x-1.5 opacity-40 cursor-not-allowed border-dark-750 text-slate-500"
                                   title={
                                     channel.humanCount === 0 
-                                      ? "El canal está vacío. Puedes forzar la unión si deseas." 
-                                      : `Hay ${channel.humanCount} persona (el mínimo es ${minUsersRequired}). Puedes forzar la unión.`
+                                      ? `El canal está vacío. Se requieren al menos ${minUsersRequired} personas para conectar el bot.` 
+                                      : `Hay solo 1 persona. Se requieren al menos ${minUsersRequired} personas para conectar el bot.`
                                   }
                                 >
-                                  {isLoading ? (
-                                    <RotateCw size={13} className="animate-spin" />
-                                  ) : isSuccess ? (
-                                    <Check size={13} className="text-white" />
-                                  ) : (
-                                    <Zap size={13} className="text-slate-400" />
-                                  )}
+                                  <Users size={13} className="text-slate-500" />
                                   <span>
-                                    {isSuccess ? '¡Conectado!' : 'Unir Manualmente'}
+                                    {channel.humanCount === 0 
+                                      ? `Requiere mín. ${minUsersRequired} personas` 
+                                      : `Falta 1 persona (mín. ${minUsersRequired})`}
                                   </span>
                                 </button>
                               )}

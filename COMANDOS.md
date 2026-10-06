@@ -66,7 +66,9 @@ python main.py chat --user-id suna --prompt "Che Suna, estás para jugar o qué?
 
 ## 2. 🎙️ CLONACIÓN Y SÍNTESIS DE VOZ (TTS LOCAL)
 
-Genera archivos de audio `.wav` con la voz clonada de cualquier amigo a partir de texto arbitrario usando **F5-TTS** acelerado en tu GPU RTX 4070 (~2.5 segundos por audio).
+Genera archivos de audio `.wav` con la voz clonada de cualquier amigo a partir de texto arbitrario usando **VoiceStudio (OmniVoice / CosyVoice 3)** como motor principal de alta fidelidad, con **F5-TTS** como fallback automático acelerado en tu GPU RTX 4070.
+
+> **💡 VoiceStudio:** Para obtener la máxima calidad y naturalidad (cero robótico y lectura completa), inicia VoiceStudio haciendo doble clic en `iniciar_voicestudio.bat`. Si VoiceStudio no está abierto, el pipeline automáticamente usará F5-TTS.
 
 ```powershell
 # Sintetizar una frase y escucharla de inmediato por los altavoces:

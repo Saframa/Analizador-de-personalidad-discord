@@ -174,7 +174,7 @@ export class PresenceWatcher {
     // REGLA 3: Desconexión automática con Debounce (< MIN_USERS_TO_RECORD en canal activo)
     if (isConnectedHere && this.sessionManager.isRecording()) {
       if (humanCount < config.MIN_USERS_TO_RECORD) {
-        const graceSeconds = this.isManualConnected ? 120 : config.DEBOUNCE_LEAVE_SECONDS;
+        const graceSeconds = config.DEBOUNCE_LEAVE_SECONDS;
         this.scheduleGracefulLeave(channel.name, graceSeconds);
       } else {
         // Si hay suficientes personas, cancelar cualquier salida pendiente
@@ -212,6 +212,11 @@ export class PresenceWatcher {
     let connection: VoiceConnection | null = null;
     try {
       const humanCount = channel.members.filter((m) => !m.user.bot).size;
+      if (humanCount < config.MIN_USERS_TO_RECORD) {
+        console.warn(`⚠️ [PresenceWatcher] Conexión abortada a '${channel.name}': solo hay ${humanCount} usuario(s) (mínimo requerido: ${config.MIN_USERS_TO_RECORD}).`);
+        return false;
+      }
+
       console.log(`🚀 [PresenceWatcher] Conectando bot a '${channel.name}' (${humanCount} usuarios humanos)...`);
 
       connection = joinVoiceChannel({
@@ -497,6 +502,15 @@ export class PresenceWatcher {
       if (perms && !perms.has(PermissionFlagsBits.Connect)) {
         return { success: false, message: `El bot no tiene permisos para conectarse a '${targetChannel.name}'.` };
       }
+    }
+
+    // Condición estricta: al menos MIN_USERS_TO_RECORD usuarios humanos
+    const humanCount = targetChannel.members.filter((m) => !m.user.bot).size;
+    if (humanCount < config.MIN_USERS_TO_RECORD) {
+      return {
+        success: false,
+        message: `No se puede unir a '${targetChannel.name}': se requieren al menos ${config.MIN_USERS_TO_RECORD} personas en el canal (actualmente hay ${humanCount}).`,
+      };
     }
 
     if (this.currentChannelId === channelId && this.sessionManager.isRecording()) {

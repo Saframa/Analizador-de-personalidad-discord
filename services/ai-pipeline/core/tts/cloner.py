@@ -14,6 +14,7 @@ import wave
 from typing import List, Optional, Tuple
 
 import numpy as np
+import requests
 import soundfile as sf
 import torch
 
@@ -361,6 +362,170 @@ class F5TTSVoiceCloner(BaseVoiceCloner):
         release_tts_gpu_memory()
 
 
+class VoiceStudioCloner(BaseVoiceCloner):
+    """
+    Motor de Clonación y Síntesis de Voz conectado a VoiceStudio local (puerto 3900).
+    Aprovecha la API REST OpenAI-compatible (/v1/audio/speech) y los perfiles locales (/profiles)
+    de VoiceStudio, impulsados por OmniVoice y CosyVoice 3 en GPU local (RTX 4070).
+    Incluye fallback transparente a F5-TTS o Mock si VoiceStudio no está en ejecución.
+    """
+
+    def __init__(
+        self,
+        api_url: Optional[str] = None,
+        model: str = "omnivoice",
+        timeout_seconds: float = 90.0,
+        fallback_cloner: Optional[BaseVoiceCloner] = None,
+        device: Optional[str] = None,
+    ):
+        self.api_url = (api_url or os.getenv("VOICESTUDIO_API_URL", "http://127.0.0.1:3900")).rstrip("/")
+        self.model = model
+        self.timeout_seconds = timeout_seconds
+        self._fallback_cloner = fallback_cloner
+        self.device = device
+        self._profiles_cache = {}
+
+    @property
+    def fallback_cloner(self) -> BaseVoiceCloner:
+        """Inicializa el clonador fallback de forma perezosa para no acaparar VRAM innecesariamente."""
+        if self._fallback_cloner is None:
+            try:
+                logger.info("Inicializando motor fallback F5-TTS...")
+                self._fallback_cloner = F5TTSVoiceCloner(device=self.device) if torch.cuda.is_available() else MockVoiceCloner()
+            except Exception as e:
+                logger.warning(f"No se pudo inicializar F5TTS fallback: {e}. Usando Mock.")
+                self._fallback_cloner = MockVoiceCloner()
+        return self._fallback_cloner
+
+    def is_available(self) -> bool:
+        """Verifica si el servidor local de VoiceStudio está activo y respondiendo."""
+        try:
+            resp = requests.get(f"{self.api_url}/health", timeout=3.0)
+            return resp.status_code == 200
+        except Exception:
+            return False
+
+    def _get_or_create_profile(self, user_name: str, reference_audio_path: str, reference_text: Optional[str] = None) -> str:
+        """Garantiza que exista un perfil de voz sincronizado en VoiceStudio para el usuario/muestra."""
+        if user_name in self._profiles_cache:
+            return self._profiles_cache[user_name]
+
+        # 1. Consultar perfiles existentes
+        try:
+            resp = requests.get(f"{self.api_url}/profiles", timeout=5.0)
+            if resp.status_code == 200:
+                profiles = resp.json()
+                for p in profiles:
+                    if p.get("name") == user_name:
+                        # Si el texto de referencia cambió, renovar el perfil para evitar desincronización
+                        if reference_text and p.get("ref_text") and p.get("ref_text").strip() != reference_text.strip():
+                            logger.info(f"Texto de referencia actualizado para '{user_name}'. Recreando perfil...")
+                            requests.delete(f"{self.api_url}/profiles/{p['id']}", timeout=5.0)
+                            break
+                        pid = p["id"]
+                        self._profiles_cache[user_name] = pid
+                        return pid
+        except Exception as e:
+            logger.warning(f"Error consultando perfiles en VoiceStudio: {e}")
+
+        # 2. Registrar perfil con la muestra de audio y transcripción fiel
+        try:
+            with open(reference_audio_path, "rb") as f:
+                files = {"ref_audio": (os.path.basename(reference_audio_path), f, "audio/wav")}
+                data = {
+                    "name": user_name,
+                    "ref_text": reference_text or "",
+                    "language": "Spanish",
+                    "kind": "clone",
+                }
+                resp = requests.post(f"{self.api_url}/profiles", files=files, data=data, timeout=15.0)
+                if resp.status_code in (200, 201):
+                    pdata = resp.json()
+                    pid = pdata.get("id") or user_name
+                    self._profiles_cache[user_name] = pid
+                    logger.info(f"Perfil de voz '{user_name}' registrado en VoiceStudio con ID: {pid}")
+                    return pid
+                else:
+                    logger.warning(f"VoiceStudio respondió {resp.status_code} al crear perfil: {resp.text}")
+        except Exception as e:
+            logger.warning(f"Fallo al registrar perfil '{user_name}' en VoiceStudio: {e}")
+
+        return user_name
+
+    def clone_speech(
+        self,
+        target_text: str,
+        reference_audio_path: str,
+        output_path: str,
+        reference_text: Optional[str] = None,
+        speed: float = 1.0,
+        **kwargs,
+    ) -> str:
+        if not self.is_available():
+            logger.warning("VoiceStudio no responde en 127.0.0.1:3900. Usando motor fallback...")
+            return self.fallback_cloner.clone_speech(
+                target_text=target_text,
+                reference_audio_path=reference_audio_path,
+                output_path=output_path,
+                reference_text=reference_text,
+                speed=speed,
+                **kwargs,
+            )
+
+        clean_text = normalize_text_for_tts(target_text)
+        if not clean_text:
+            clean_text = "..."
+
+        user_folder = os.path.basename(os.path.dirname(os.path.abspath(reference_audio_path)))
+        profile_name = f"user_{user_folder}" if user_folder and user_folder != "." else "clone_user"
+        voice_id = self._get_or_create_profile(profile_name, reference_audio_path, reference_text)
+
+        logger.info(f"Sintetizando voz en VoiceStudio (perfil='{profile_name}', voice_id='{voice_id}', pasos=32)...")
+        payload = {
+            "model": self.model,
+            "input": clean_text,
+            "voice": voice_id,
+            "response_format": "wav",
+            "speed": float(speed),
+            "language": "es",
+            "num_step": 32,
+            "guidance_scale": 2.5,
+            "preprocess_prompt": True,
+            "denoise": True,
+        }
+
+        resp = requests.post(
+            f"{self.api_url}/v1/audio/speech",
+            json=payload,
+            timeout=self.timeout_seconds,
+        )
+
+        if resp.status_code != 200:
+            err_msg = f"VoiceStudio API error ({resp.status_code}): {resp.text}"
+            logger.error(err_msg)
+            logger.warning("Intentando fallback ante error de VoiceStudio...")
+            return self.fallback_cloner.clone_speech(
+                target_text=target_text,
+                reference_audio_path=reference_audio_path,
+                output_path=output_path,
+                reference_text=reference_text,
+                speed=speed,
+                **kwargs,
+            )
+
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        with open(output_path, "wb") as f:
+            f.write(resp.content)
+
+        return output_path
+
+    def release(self) -> None:
+        """VoiceStudio gestiona su propia memoria en su proceso independiente."""
+        if self._fallback_cloner is not None:
+            self._fallback_cloner.release()
+            self._fallback_cloner = None
+
+
 def get_voice_cloner(
     engine: str = "auto",
     mock: bool = False,
@@ -368,12 +533,28 @@ def get_voice_cloner(
 ) -> BaseVoiceCloner:
     """
     Factory que retorna la instancia adecuada de clonador de voz.
-    Si mock es True o CUDA no está disponible, retorna MockVoiceCloner.
+    Si mock es True, retorna MockVoiceCloner.
+    Respeta la variable de entorno TTS_ENGINE (voicestudio, f5-tts, mock, auto).
     """
     if mock:
         return MockVoiceCloner()
 
-    if engine in ("auto", "f5-tts"):
+    env_engine = os.getenv("TTS_ENGINE", engine).lower()
+
+    # Si se pide explícitamente VoiceStudio
+    if env_engine in ("voicestudio", "voice-studio"):
+        return VoiceStudioCloner(device=device)
+
+    # Modo automático inteligente: prioriza VoiceStudio con fallback perezoso
+    if env_engine == "auto":
+        vs_cloner = VoiceStudioCloner(device=device)
+        if vs_cloner.is_available():
+            logger.info("VoiceStudio detectado en http://127.0.0.1:3900 - Activando como motor TTS principal.")
+        else:
+            logger.info("VoiceStudio no detectado al inicio; VoiceStudioCloner gestionará fallback si no responde.")
+        return vs_cloner
+
+    if env_engine in ("f5-tts", "f5_tts", "f5"):
         try:
             return F5TTSVoiceCloner(device=device)
         except Exception as e:

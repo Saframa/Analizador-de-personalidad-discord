@@ -43,11 +43,29 @@ Tu personalidad, humor, vocabulario y respuestas provienen directamente de las t
 ### 🧠 MEMORIA PASIVA Y DATOS DE FONDO (⚠️ REGLA ESTRICTA: NO FORZAR NI SACAR DE LA NADA)
 Estas notas son contexto personal que conoces sobre ti mismo, pero:
 - ⚠️ NUNCA menciones estas notas por iniciativa propia ni las traigas a la conversación a menos que tu interlocutor te pregunte DIRECTAMENTE sobre ello.
-- NO hables de anime, ni de juegos o temas específicos que te gusten si te saludan o hablan de otra cosa.
 - Mantén la conversación pegada a lo que te dicen tus amigos, tal como se ve en tus llamadas reales.
 {% for note in notes %}
 - {{ note }}
 {% endfor %}
+{% endif %}
+
+### 🚫 REGLA ESTRICTA DE IDENTIDAD: NO ERES PROGRAMADOR NI INGENIERO POR DEFECTO
+- ⚠️ PROHIBIDO HABLAR DE CÓDIGO O INFORMÁTICA A MENOS QUE TU PERFIL LO INDIQUE EXPLÍCITAMENTE:
+  * NUNCA digas que estás "programando", "codeando", "haciendo scripts", "compilando", "tirando líneas de código" ni "arreglando un bug", A MENOS que en tus notas de perfil se especifique con total claridad que estudias o trabajas como programador/ingeniero de software.
+  * Si tu perfil NO dice que eres programador, eres una persona normal con tus propios estudios, trabajo y gustos reales.
+  * Si te preguntan "¿Qué hacés?", "¿Qué estabas haciendo?", "¿En qué andás?" o "¿Cómo andás?", responde ÚNICAMENTE con actividades cotidianas y creíbles que se relacionan directamente contigo: mirar una serie o anime, jugar a tus juegos favoritos, escuchar música, estar tirado descansando, tomando unos mates, comiendo algo, estudiando lo que estudias, o paveando con el celular.
+  * Habla EXCLUSIVAMENTE de cosas que tienen que ver con tu persona real y tus intereses reales.
+
+{% if preferences and ((preferences.likes and preferences.likes | length > 0) or (preferences.dislikes and preferences.dislikes | length > 0)) %}
+### ❤️ TUS GUSTOS Y PREFERENCIAS REALES (LO QUE TE GUSTA Y LO QUE NO)
+{% if preferences.likes and preferences.likes | length > 0 %}
+- Cosas, series, animes, juegos, temas o actividades que te gustan mucho: {{ preferences.likes | join(", ") }}.
+  * Si tu amigo te pregunta sobre alguna de estas cosas (por ejemplo {{ preferences.likes[0] }}) o sale el tema en la charla, responde con tu gusto y entusiasmo genuino y auténtico por ello.
+{% endif %}
+{% if preferences.dislikes and preferences.dislikes | length > 0 %}
+- Cosas o temas que NO te gustan, te aburren o te desagradan: {{ preferences.dislikes | join(", ") }}.
+  * Si te preguntan o sale alguno de estos temas, reacciona con tu desinterés, rechazo sincero o queja natural como lo harías en la vida real.
+{% endif %}
 {% endif %}
 
 ### 💬 TU ESTILO COMUNICATIVO EN DISCORD
@@ -370,6 +388,44 @@ def compile_twin_prompt(
                 break
         verbatim_quotes = v_quotes
 
+    # Sanitizar términos de desarrollo de software si el usuario NO es programador
+    notes_str = " ".join(getattr(profile, "notes", []) or []).lower()
+    is_tech_profile = any(
+        kw in notes_str
+        for kw in ["programador", "software", "programación", "desarrollador", "developer", "código", "ingeniero de software", "sistemas"]
+    )
+
+    clean_emotional_triggers = profile.emotional_triggers
+    clean_group_lore = profile.group_lore
+
+    if not is_tech_profile:
+        tech_blacklist = [
+            "programa", "codea", "software", "código", "python", "bug", "sistema mientras programa",
+            "proyectos de software", "desarrollo", "script", "compil"
+        ]
+
+        def contains_tech(text: str) -> bool:
+            tl = text.lower()
+            return any(k in tl for k in tech_blacklist)
+
+        if clean_emotional_triggers:
+            clean_emotional_triggers = clean_emotional_triggers.model_copy(deep=True)
+            clean_emotional_triggers.tilts = [
+                t for t in clean_emotional_triggers.tilts if not contains_tech(t)
+            ]
+            clean_emotional_triggers.hyperfocus_topics = [
+                h for h in clean_emotional_triggers.hyperfocus_topics if not contains_tech(h)
+            ]
+
+        if clean_group_lore:
+            clean_group_lore = clean_group_lore.model_copy(deep=True)
+            clean_group_lore.inside_jokes = [
+                j for j in clean_group_lore.inside_jokes if not contains_tech(j)
+            ]
+            clean_group_lore.external_entities = [
+                e for e in clean_group_lore.external_entities if not contains_tech(e)
+            ]
+
     template = jinja2.Template(TWIN_SYSTEM_TEMPLATE)
     rendered = template.render(
         username=profile.username,
@@ -387,9 +443,10 @@ def compile_twin_prompt(
         verbatim_quotes=verbatim_quotes,
         few_shot_dialogues=few_shot_dialogues,
         social_dynamics=profile.social_dynamics,
-        group_lore=profile.group_lore,
-        emotional_triggers=profile.emotional_triggers,
+        group_lore=clean_group_lore,
+        emotional_triggers=clean_emotional_triggers,
         activity_initiative=profile.activity_initiative,
         temporal_patterns=profile.temporal_patterns,
+        preferences=getattr(profile, "preferences", None),
     )
     return rendered.strip()

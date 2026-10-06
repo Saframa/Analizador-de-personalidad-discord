@@ -23,6 +23,8 @@ export default function App() {
   const [chatUserId, setChatUserId] = useState(null);
   const [isLogsOpen, setIsLogsOpen] = useState(false);
 
+  const isBackendReady = !statusError && Boolean(status);
+
   const pollStatus = async () => {
     try {
       const data = await fetchStatus();
@@ -35,9 +37,9 @@ export default function App() {
 
   useEffect(() => {
     pollStatus();
-    const interval = setInterval(pollStatus, 3000);
+    const interval = setInterval(pollStatus, status ? 3000 : 1500);
     return () => clearInterval(interval);
-  }, []);
+  }, [status !== null]);
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-dark-950 text-slate-200">
@@ -73,6 +75,7 @@ export default function App() {
         {currentTab === 'stats' && (
           <GlobalStatsView
             onSelectUser={(userId) => setSelectedUserId(userId)}
+            isBackendReady={isBackendReady}
           />
         )}
 
@@ -80,28 +83,31 @@ export default function App() {
           <UsersView
             onSelectUser={(userId) => setSelectedUserId(userId)}
             onOpenChat={(userId) => setChatUserId(userId)}
+            isBackendReady={isBackendReady}
           />
         )}
 
         {currentTab === 'social' && (
           <SocialGraphView
             onSelectUser={(userId) => setSelectedUserId(userId)}
+            isBackendReady={isBackendReady}
           />
         )}
 
         {currentTab === 'channels' && (
-          <VoiceChannelsView />
+          <VoiceChannelsView isBackendReady={isBackendReady} />
         )}
 
         {currentTab === 'hardware' && (
           <HardwareView
             status={status}
             onRefresh={pollStatus}
+            onOpenLogs={() => setIsLogsOpen(true)}
           />
         )}
 
         {currentTab === 'tts' && (
-          <TtsStudioView />
+          <TtsStudioView isBackendReady={isBackendReady} />
         )}
       </main>
 

@@ -10,6 +10,7 @@ import {
   AudioFileInfo,
 } from '../contracts/session.js';
 import { config } from '../config.js';
+import { notifyWatcherSessionReady } from './watcherNotifier.js';
 
 export class SessionManager {
   private currentSessionId: string | null = null;
@@ -194,6 +195,9 @@ export class SessionManager {
     }
 
     console.log(`✅ [SessionManager] Metadata guardada atómicamente en: ${metadataFilePath}`);
+
+    // Notificar al Watcher de IA para procesamiento instantáneo (0 ms de latencia)
+    notifyWatcherSessionReady(sessionId, sessionDir);
 
     // Detener timer de rotación
     this.stopRotationTimer();

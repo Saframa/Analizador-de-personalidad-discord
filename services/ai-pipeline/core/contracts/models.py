@@ -180,6 +180,17 @@ class TemporalPatterns(BaseModel):
     late_night_attitude: Optional[str] = None
 
 
+class UserPreferences(BaseModel):
+    likes: List[str] = Field(
+        default_factory=list,
+        description="Cosas, temas, series, animes, juegos, comidas o actividades que a la persona le gustan explícitamente (ej. 'Bleach', 'Rocket League', 'el asado')"
+    )
+    dislikes: List[str] = Field(
+        default_factory=list,
+        description="Cosas, temas o actividades que a la persona NO le gustan, le aburren o le desagradan explícitamente (ej. 'madrugar', 'el reggaetón', 'estudiar matemáticas')"
+    )
+
+
 class UserProfile(BaseModel):
     version: Literal["1.0.0"] = Field("1.0.0")
     user_id: str = Field(..., min_length=1)
@@ -201,6 +212,7 @@ class UserProfile(BaseModel):
     emotional_triggers: EmotionalTriggers = Field(default_factory=EmotionalTriggers)
     activity_initiative: ActivityInitiative = Field(default_factory=ActivityInitiative)
     temporal_patterns: TemporalPatterns = Field(default_factory=TemporalPatterns)
+    preferences: UserPreferences = Field(default_factory=UserPreferences)
 
     def save_atomic(self, file_path: str) -> None:
         temp_path = f"{file_path}.tmp"

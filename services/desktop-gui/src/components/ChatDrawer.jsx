@@ -50,10 +50,11 @@ export default function ChatDrawer({ userId, onClose }) {
 
     try {
       const res = await sendChatMessage(userId, text, backend);
+      const replyText = res.reply || res.response || '';
       const assistantMsg = {
         role: 'assistant',
-        content: res.response,
-        model_used: res.model_used,
+        content: replyText,
+        model_used: res.model_used || (backend === 'auto' ? 'Gemini / LLaMA' : backend),
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages((prev) => [...prev, assistantMsg]);
@@ -86,9 +87,14 @@ export default function ChatDrawer({ userId, onClose }) {
   };
 
   const handlePlayVoice = async (text, idx) => {
+    const cleanText = (text || '').trim();
+    if (!cleanText) {
+      alert('No hay texto para sintetizar.');
+      return;
+    }
     try {
       setPlayingAudioIdx(idx);
-      const audioUrl = await synthesizeSpeech(userId, text);
+      const audioUrl = await synthesizeSpeech(userId, cleanText);
       if (audioRef.current) {
         audioRef.current.src = audioUrl;
         audioRef.current.play();

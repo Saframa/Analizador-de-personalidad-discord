@@ -60,7 +60,7 @@ class LlamaClient:
             try:
                 from groq import Groq
 
-                self._groq_client = Groq(api_key=self.groq_key)
+                self._groq_client = Groq(api_key=self.groq_key, max_retries=0, timeout=12.0)
             except Exception as e:
                 logger.warning(f"No se pudo inicializar cliente Groq: {e}")
 
@@ -138,14 +138,12 @@ class LlamaClient:
                 return target
 
             candidates = [
-                "llama-3.3-70b-versatile",
-                "llama-3.1-70b-versatile",
-                "llama-3.1-8b-instant",
-                "llama3-70b-8192",
-                "llama3-8b-8192",
-                "qwen/qwen3.8-27b",
                 "openai/gpt-oss-120b",
                 "openai/gpt-oss-20b",
+                "allam-2-7b",
+                "llama-3.3-70b-versatile",
+                "llama-3.1-8b-instant",
+                "qwen/qwen3.8-27b",
             ]
             for cand in candidates:
                 if cand in available_models:
@@ -163,7 +161,7 @@ class LlamaClient:
         except Exception as e:
             logger.warning(f"No se pudo consultar lista de modelos Groq: {e}")
 
-        return target or DEFAULT_GROQ_MODEL
+        return target or "openai/gpt-oss-120b"
 
     def _call_groq(
         self,
@@ -174,7 +172,7 @@ class LlamaClient:
         """Ejecuta inferencia con la API oficial de Groq."""
         from groq import Groq
 
-        client = self._groq_client or Groq(api_key=self.groq_key)
+        client = self._groq_client or Groq(api_key=self.groq_key, max_retries=0, timeout=12.0)
         model_name = self._resolve_groq_model(client)
 
         completion = client.chat.completions.create(

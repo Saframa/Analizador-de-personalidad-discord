@@ -180,6 +180,17 @@ class ProfilerRepository:
             idioms = json.loads(u["preferred_idioms"] or "[]")
             nicks = json.loads(u["nicknames"] or "[]")
 
+            # Gustos y aversiones (Preferences)
+            likes = []
+            dislikes = []
+            try:
+                if "likes" in u.keys() and u["likes"]:
+                    likes = json.loads(u["likes"])
+                if "dislikes" in u.keys() and u["dislikes"]:
+                    dislikes = json.loads(u["dislikes"])
+            except Exception:
+                pass
+
             return {
                 "user_id": uid,
                 "username": u["username"],
@@ -210,6 +221,10 @@ class ProfilerRepository:
                     "humor_style": u["humor_type"] or "Conversacional",
                     "dialogue_cadence": u["cadence"] or "Moderado",
                     "preferred_idioms": idioms,
+                },
+                "preferences": {
+                    "likes": likes,
+                    "dislikes": dislikes,
                 },
                 "lexicon": {
                     "top_words": top_words,

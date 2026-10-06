@@ -26,5 +26,18 @@ if ($conn) {
     }
 }
 
+# Auto-iniciar contenedor de VoiceStudio si existe
+try {
+    $vsRunning = docker ps --filter "name=voicestudio" --filter "status=running" --format "{{.Names}}" 2>$null
+    if (-not $vsRunning) {
+        $vsExists = docker ps -a --filter "name=voicestudio" --format "{{.Names}}" 2>$null
+        if ($vsExists) {
+            Write-Host "[INFO] Iniciando motor de voz VoiceStudio en Docker (segundo plano)..." -ForegroundColor Magenta
+            docker start voicestudio 2>$null | Out-Null
+        }
+    }
+} catch {}
+
+
 Write-Host "[INFO] Iniciando backend IA y Frontend Electron..." -ForegroundColor Green
 npm run dev

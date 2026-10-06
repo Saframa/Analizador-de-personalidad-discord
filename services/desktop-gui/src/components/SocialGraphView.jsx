@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { fetchSocialGraph } from '../api';
 
-export default function SocialGraphView({ onSelectUser }) {
+export default function SocialGraphView({ onSelectUser, isBackendReady }) {
   const [data, setData] = useState({ nodes: [], edges: [], stats: {} });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -16,7 +16,7 @@ export default function SocialGraphView({ onSelectUser }) {
   const [zoom, setZoom] = useState(1);
   const svgRef = useRef(null);
 
-  const loadGraph = async () => {
+  const loadGraph = async (retryCount = 0) => {
     setLoading(true);
     setError(null);
     try {
@@ -27,8 +27,12 @@ export default function SocialGraphView({ onSelectUser }) {
         setSelectedNodeId(res.nodes[0].id);
       }
     } catch (err) {
-      console.error(err);
-      setError('Error al cargar la red social del servidor.');
+      if (retryCount < 2) {
+        setTimeout(() => loadGraph(retryCount + 1), 1000);
+      } else {
+        console.error(err);
+        setError('Error al cargar la red social del servidor.');
+      }
     } finally {
       setLoading(false);
     }
@@ -36,7 +40,7 @@ export default function SocialGraphView({ onSelectUser }) {
 
   useEffect(() => {
     loadGraph();
-  }, []);
+  }, [isBackendReady]);
 
   // Filtrar aristas por mínimo de sesiones
   const filteredEdges = useMemo(() => {

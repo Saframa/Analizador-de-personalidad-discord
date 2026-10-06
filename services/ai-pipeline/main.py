@@ -85,6 +85,7 @@ from core.vad.overlap_detector import (
 from core.vad.silero import SileroVADDetector
 from core.session_reconciler import reconcile_orphan_sessions, is_session_active
 from core.db.sync import sync_all
+from core.watcher_signal import WatcherSignalListener
 
 # Cargar variables de entorno (.env)
 from dotenv import load_dotenv
@@ -761,7 +762,8 @@ def watch_sessions(
     log.info("=" * 65)
     log.info("👀 MODO VIGILANTE AUTÓNOMO (WATCHER) INICIADO")
     log.info(f"📁 Monitoreando directorio:  {raw_sessions_dir}")
-    log.info(f"⏱️  Intervalo de sondeo:     {interval}s")
+    log.info(f"⏱️  Intervalo de sondeo:     {interval}s (respaldo)")
+    log.info("⚡ Señalización rápida:     UDP 127.0.0.1:5056 (despertar instantáneo 0 ms)")
     log.info(f"🧠 Perfilado Gemini:        {'ACTIVO' if profile else 'Desactivado'}")
     log.info(f"🧹 Limpieza de disco:       {'ACTIVA (audio purgado tras perfilar)' if delete_audio else 'Desactivada'}")
     log.info(f"🎙️ Modelo STT:              faster-whisper ({model_size})")
@@ -787,6 +789,8 @@ def watch_sessions(
             lf.write(str(os.getpid()))
     except Exception:
         pass
+
+    signal_listener = WatcherSignalListener()
 
     try:
         while True:
@@ -829,8 +833,34 @@ def watch_sessions(
                         session_id = os.path.basename(session_dir)
                         log.info(f"\n🔔 [NUEVA LLAMADA DETECTADA: {session_id}]")
 
+                        def _set_live_status(stage: str, task: str, pct: int):
+                            try:
+                                sf = os.path.join(base_storage_dir, ".pipeline_status.json")
+                                with open(sf, "w", encoding="utf-8") as f:
+                                    json.dump({
+                                        "is_running": True,
+                                        "session_id": session_id,
+                                        "stage": stage,
+                                        "current_task": task,
+                                        "progress_percent": pct,
+                                        "timestamp": time.time(),
+                                        "trigger": "watcher"
+                                    }, f)
+                            except Exception:
+                                pass
+
+                        def _clear_live_status():
+                            try:
+                                sf = os.path.join(base_storage_dir, ".pipeline_status.json")
+                                if os.path.exists(sf):
+                                    os.remove(sf)
+                            except Exception:
+                                pass
+
                         try:
+                            _set_live_status("vad", f"Detectando voz y solapamientos en {session_id}...", 25)
                             if not os.path.exists(transcript_file):
+                                _set_live_status("stt", f"Transcribiendo {session_id} con faster-whisper (CUDA)...", 50)
                                 process_session(
                                     session_dir=session_dir,
                                     model_size=model_size,
@@ -838,6 +868,7 @@ def watch_sessions(
                                     base_storage_dir=base_storage_dir,
                                 )
                             if profile:
+                                _set_live_status("profiling", f"Sintetizando perfiles y Big Five con Gemini...", 80)
                                 profile_session(
                                     session_dir=session_dir,
                                     base_storage_dir=base_storage_dir,
@@ -850,12 +881,14 @@ def watch_sessions(
                             create_daily_backup(base_storage_dir)
 
                             # Sincronizar perfiles y sesiones actualizadas hacia SQLite
+                            _set_live_status("sync", "Sincronizando perfiles y métricas hacia SQLite...", 95)
                             try:
                                 sync_all(base_storage_dir)
                             except Exception as sync_err:
                                 log.warning(f"Aviso al sincronizar SQLite: {sync_err}")
 
                             log.info(f"✅ [LLAMADA {session_id} COMPLETADA - AUDIO PURGADO]\n")
+                            _clear_live_status()
 
                         except Exception as proc_err:
                             tb = traceback.format_exc()
@@ -869,15 +902,20 @@ def watch_sessions(
                                 pass
                             log.error(f"🚨 [CUARENTENA] Sesión {session_id} falló durante el procesamiento. Apartada con marca .failed: {proc_err}")
 
-                time.sleep(interval)
+                # Esperar semáforo UDP instantáneo de nuevo audio o timeout de respaldo
+                signal_payload = signal_listener.wait_for_signal(timeout=interval)
+                if signal_payload:
+                    sid = signal_payload.get("sessionId", "nueva")
+                    log.info(f"⚡ [SEÑAL INSTANTÁNEA] Audio guardado para sesión '{sid}'. Despertando Watcher de inmediato (0 ms).")
             except (KeyboardInterrupt, EOFError):
                 raise
             except Exception as e:
                 log.warning(f"⚠️ Error en ciclo de vigilancia: {e}")
-                time.sleep(interval)
+                time.sleep(min(5, interval))
     except (KeyboardInterrupt, EOFError):
         log.info("\n🛑 Vigilante detenido por el usuario.\n")
     finally:
+        signal_listener.close()
         if os.path.exists(lock_file):
             try:
                 with open(lock_file, "r") as lf:

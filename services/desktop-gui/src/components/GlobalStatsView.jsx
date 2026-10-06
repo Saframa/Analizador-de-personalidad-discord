@@ -10,19 +10,23 @@ import {
   RotateCw 
 } from 'lucide-react';
 
-export default function GlobalStatsView({ onSelectUser }) {
+export default function GlobalStatsView({ onSelectUser, isBackendReady }) {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const loadData = async () => {
+  const loadData = async (retryCount = 0) => {
     try {
       setLoading(true);
       setError(null);
       const data = await fetchGlobalStats();
       setStats(data);
     } catch (err) {
-      setError(err.message);
+      if (retryCount < 2) {
+        setTimeout(() => loadData(retryCount + 1), 1000);
+      } else {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -30,7 +34,7 @@ export default function GlobalStatsView({ onSelectUser }) {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [isBackendReady]);
 
   if (loading && !stats) {
     return (

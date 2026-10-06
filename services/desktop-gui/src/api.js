@@ -1,9 +1,15 @@
 const BASE_URL = 'http://127.0.0.1:8000';
 
 export async function fetchStatus() {
-  const res = await fetch(`${BASE_URL}/api/status`);
-  if (!res.ok) throw new Error('Error al obtener estado');
-  return res.json();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 2500);
+  try {
+    const res = await fetch(`${BASE_URL}/api/status`, { signal: controller.signal });
+    if (!res.ok) throw new Error('Error al obtener estado');
+    return await res.json();
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function toggleRecorder() {
@@ -61,13 +67,33 @@ export async function uploadAvatar(userId, file) {
 }
 
 export async function sendChatMessage(userId, message, backend = 'auto') {
-  const res = await fetch(`${BASE_URL}/api/chat/${encodeURIComponent(userId)}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, backend }),
-  });
-  if (!res.ok) throw new Error('Error en el chat');
-  return res.json();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 segundos máximo
+
+  try {
+    const res = await fetch(`${BASE_URL}/api/chat/${encodeURIComponent(userId)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, backend }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      let errorMsg = 'Error en el chat';
+      try {
+        const errData = await res.json();
+        if (errData && errData.detail) errorMsg = errData.detail;
+      } catch (_) {}
+      throw new Error(errorMsg);
+    }
+    return await res.json();
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error('Tiempo de espera agotado: el servidor tardó más de 20 segundos en responder.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function clearChatHistory(userId) {
@@ -83,7 +109,14 @@ export async function synthesizeSpeech(userId, text) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
   });
-  if (!res.ok) throw new Error('Error al sintetizar voz');
+  if (!res.ok) {
+    let msg = 'Error al sintetizar voz';
+    try {
+      const errData = await res.json();
+      if (errData && errData.detail) msg = errData.detail;
+    } catch (_) {}
+    throw new Error(msg);
+  }
   const blob = await res.blob();
   return URL.createObjectURL(blob);
 }

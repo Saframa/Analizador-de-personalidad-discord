@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Cpu, 
   HardDrive, 
@@ -8,18 +8,34 @@ import {
   Square, 
   Flame, 
   RotateCw, 
-  Zap,
-  Clock,
-  Check,
-  CheckCircle2,
-  AlertCircle
+  Zap, 
+  Clock, 
+  Check, 
+  CheckCircle2, 
+  AlertCircle,
+  Terminal,
+  Sparkles,
+  Mic,
+  Brain,
+  Database,
+  ChevronRight,
+  Layers,
+  Volume2
 } from 'lucide-react';
-import { toggleRecorder, toggleWatcher, triggerProcessAll } from '../api';
+import { toggleRecorder, toggleWatcher, triggerProcessAll, fetchPipelineLogs } from '../api';
 
-export default function HardwareView({ status, onRefresh }) {
+export default function HardwareView({ status, onRefresh, onOpenLogs }) {
   const [loadingAction, setLoadingAction] = useState(null); // 'both-start' | 'both-pause' | 'recorder' | 'watcher' | 'process-all' | 'refresh'
   const [successAction, setSuccessAction] = useState(null);
   const [actionMessage, setActionMessage] = useState(null);
+
+  // Estado del monitor de procesamiento en vivo
+  const [localIsProcessing, setLocalIsProcessing] = useState(false);
+  const [pipelineData, setPipelineData] = useState(null);
+  const [justFinished, setJustFinished] = useState(false);
+  const [justFailed, setJustFailed] = useState(null);
+  const [processingDuration, setProcessingDuration] = useState(0);
+  const logsTerminalRef = useRef(null);
 
   const hw = status?.hardware || {};
   const daemons = status?.daemons || {};
@@ -39,8 +55,15 @@ export default function HardwareView({ status, onRefresh }) {
 
   const recorderActive = daemons.recorder?.active;
   const watcherActive = daemons.watcher?.active;
-  const isBatchRunning = daemons.is_processing_batch;
   const nextProc = daemons.next_processing;
+
+  // Determinar si hay procesamiento activo (por lote manual, por watcher o por estado local)
+  const isEffectivelyProcessing = Boolean(
+    daemons.is_processing_batch || 
+    localIsProcessing || 
+    pipelineData?.is_running
+  );
+  const isBatchRunning = isEffectivelyProcessing;
 
   // Contador regresivo suave que corre localmente cada segundo
   const [localSeconds, setLocalSeconds] = useState(nextProc?.seconds_remaining ?? null);
@@ -58,6 +81,64 @@ export default function HardwareView({ status, onRefresh }) {
     }, 1000);
     return () => clearInterval(interval);
   }, [nextProc?.is_automatic, localSeconds !== null]);
+
+  // Sondeo de logs en vivo a alta frecuencia mientras se esté procesando
+  useEffect(() => {
+    let timer = null;
+    const pollLogs = async () => {
+      try {
+        const res = await fetchPipelineLogs(40);
+        setPipelineData(res);
+        if (!res.is_running && (localIsProcessing || daemons.is_processing_batch)) {
+          setLocalIsProcessing(false);
+          if (res.last_run?.success) {
+            playSuccessFanfare();
+            setJustFinished(true);
+            setJustFailed(null);
+            if (onRefresh) onRefresh();
+          } else if (res.last_run?.success === false) {
+            setJustFailed(res.last_run?.error || 'El proceso finalizó con advertencias o error');
+          }
+        }
+      } catch {}
+    };
+
+    if (isEffectivelyProcessing) {
+      pollLogs();
+      timer = setInterval(pollLogs, 900);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [isEffectivelyProcessing, localIsProcessing, daemons.is_processing_batch]);
+
+  // Cronómetro de duración de la tarea actual
+  useEffect(() => {
+    let interval = null;
+    if (isEffectivelyProcessing) {
+      interval = setInterval(() => {
+        setProcessingDuration((prev) => prev + 1);
+      }, 1000);
+    } else {
+      setProcessingDuration(0);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isEffectivelyProcessing]);
+
+  // Auto-scroll del mini terminal de logs cuando ingresan nuevas líneas
+  useEffect(() => {
+    if (logsTerminalRef.current) {
+      logsTerminalRef.current.scrollTop = logsTerminalRef.current.scrollHeight;
+    }
+  }, [pipelineData?.logs]);
+
+  const formatDuration = (totalSecs) => {
+    const m = Math.floor(totalSecs / 60).toString().padStart(2, '0');
+    const s = (totalSecs % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
 
   const formatCountdown = (totalSecs) => {
     if (totalSecs === null || totalSecs === undefined) return '--:--';
@@ -86,9 +167,47 @@ export default function HardwareView({ status, onRefresh }) {
       gain.connect(ctx.destination);
       osc.start();
       osc.stop(ctx.currentTime + 0.03);
-    } catch {
-      // AudioContext bloqueado o no soportado, continuar en silencio
-    }
+    } catch {}
+  };
+
+  // Sonido de inicio de ignición de pipeline en GPU
+  const playStartChime = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(392, now); // G4
+      osc.frequency.exponentialRampToValueAtTime(784, now + 0.14); // G5
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.17);
+    } catch {}
+  };
+
+  // Fanfarria triunfal de finalización exitosa (acorde mayor ascendente C-E-G-C)
+  const playSuccessFanfare = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const chords = [523.25, 659.25, 783.99, 1046.5];
+      chords.forEach((freq, idx) => {
+        const t = ctx.currentTime + idx * 0.07;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, t);
+        gain.gain.setValueAtTime(0.06, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.26);
+      });
+    } catch {}
   };
 
   // Manejador centralizado con feedback visual y háptico garantizado
@@ -150,8 +269,42 @@ export default function HardwareView({ status, onRefresh }) {
     );
   };
 
-  const handleProcessAll = () => {
-    handleAction('process-all', triggerProcessAll, 'Procesamiento en lote iniciado en GPU');
+  const getStepStatus = (stepIndex) => {
+    // 1: VAD, 2: Transcripción CUDA, 3: IA Perfilado, 4: SQLite
+    if (!isEffectivelyProcessing && justFinished) return 'completed';
+    if (!isEffectivelyProcessing) return 'idle';
+
+    const stage = pipelineData?.stage || 'init';
+    const stageMap = {
+      init: 1,
+      vad: 1,
+      overlap: 1,
+      stt: 2,
+      curation: 3,
+      profiling: 3,
+      sync: 4,
+      completed: 5,
+    };
+
+    const currentStageNum = stageMap[stage] || 1;
+    if (currentStageNum > stepIndex) return 'completed';
+    if (currentStageNum === stepIndex) return 'active';
+    return 'pending';
+  };
+
+  const handleProcessAll = async () => {
+    playStartChime();
+    setJustFinished(false);
+    setJustFailed(null);
+    setLocalIsProcessing(true);
+    setProcessingDuration(0);
+
+    // Consulta inicial inmediata para activar panel
+    fetchPipelineLogs(30).then((logs) => setPipelineData(logs)).catch(() => {});
+
+    await handleAction('process-all', triggerProcessAll, 'Procesamiento en lote iniciado en GPU');
+
+    fetchPipelineLogs(30).then((logs) => setPipelineData(logs)).catch(() => {});
   };
 
   const handleRefresh = () => {
@@ -647,6 +800,261 @@ export default function HardwareView({ status, onRefresh }) {
             </button>
           </div>
         </div>
+
+        {/* Panel de Monitoreo de Procesamiento en Tiempo Real */}
+        {isEffectivelyProcessing && (
+          <div className="p-5 rounded-xs bg-indigo-950/20 border border-indigo-500/40 shadow-xl shadow-indigo-950/40 space-y-4 animate-in fade-in slide-in-from-top-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-indigo-900/40 pb-3">
+              <div className="flex items-center space-x-2.5">
+                <span className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
+                </span>
+                <span className="text-xs font-bold uppercase tracking-wider text-indigo-300 flex items-center gap-1.5">
+                  <Zap size={14} className="text-indigo-400 animate-pulse" />
+                  Procesando en GPU RTX 4070 (faster-whisper CUDA)
+                </span>
+                {pipelineData?.session_id && (
+                  <span className="text-[11px] font-mono px-2 py-0.5 rounded-xs bg-indigo-900/40 text-indigo-300 border border-indigo-700/40 truncate max-w-xs">
+                    {pipelineData.session_id}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center space-x-3 text-xs">
+                <div className="flex items-center space-x-1.5 text-slate-300 font-mono bg-dark-900/70 px-2.5 py-1 rounded-xs border border-dark-700">
+                  <Clock size={13} className="text-indigo-400" />
+                  <span>{formatDuration(processingDuration)}</span>
+                </div>
+                {onOpenLogs && (
+                  <button
+                    onClick={onOpenLogs}
+                    className="text-xs font-semibold text-indigo-400 hover:text-indigo-300 flex items-center space-x-1 transition-colors"
+                  >
+                    <Terminal size={13} />
+                    <span>Ver Consola Completa</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Barra de progreso */}
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-300 font-medium flex items-center gap-1.5">
+                  <RotateCw size={13} className="animate-spin text-indigo-400" />
+                  {pipelineData?.current_task || 'Ejecutando pipeline de procesamiento...'}
+                </span>
+                <span className="font-mono font-bold text-indigo-400">
+                  {pipelineData?.progress_percent || (localIsProcessing ? 15 : 0)}%
+                </span>
+              </div>
+              <div className="w-full bg-dark-900 rounded-full h-2 overflow-hidden border border-indigo-900/50">
+                <div 
+                  className="h-full bg-gradient-to-r from-indigo-500 via-cyan-400 to-emerald-400 transition-all duration-500 rounded-full"
+                  style={{ width: `${Math.max(5, pipelineData?.progress_percent || (localIsProcessing ? 15 : 0))}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Stepper de 4 fases */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 pt-1">
+              {/* Fase 1: VAD */}
+              {(() => {
+                const s = getStepStatus(1);
+                return (
+                  <div className={`p-2.5 rounded-xs border transition-all ${
+                    s === 'active' 
+                      ? 'bg-indigo-900/40 border-indigo-400 text-indigo-200 shadow-sm shadow-indigo-500/20' 
+                      : s === 'completed' 
+                      ? 'bg-emerald-950/30 border-emerald-700/50 text-emerald-300' 
+                      : 'bg-dark-900/40 border-dark-700/60 text-slate-500'
+                  }`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <Mic size={15} className={s === 'active' ? 'text-indigo-400 animate-pulse' : s === 'completed' ? 'text-emerald-400' : 'text-slate-600'} />
+                      {s === 'completed' ? (
+                        <CheckCircle2 size={14} className="text-emerald-400" />
+                      ) : s === 'active' ? (
+                        <RotateCw size={14} className="animate-spin text-indigo-400" />
+                      ) : (
+                        <span className="text-[10px] font-mono text-slate-600">1</span>
+                      )}
+                    </div>
+                    <div className="text-xs font-semibold">1. Silero VAD</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5 truncate">Detección y aislamiento</div>
+                  </div>
+                );
+              })()}
+
+              {/* Fase 2: faster-whisper CUDA */}
+              {(() => {
+                const s = getStepStatus(2);
+                return (
+                  <div className={`p-2.5 rounded-xs border transition-all ${
+                    s === 'active' 
+                      ? 'bg-indigo-900/40 border-indigo-400 text-indigo-200 shadow-sm shadow-indigo-500/20' 
+                      : s === 'completed' 
+                      ? 'bg-emerald-950/30 border-emerald-700/50 text-emerald-300' 
+                      : 'bg-dark-900/40 border-dark-700/60 text-slate-500'
+                  }`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <Cpu size={15} className={s === 'active' ? 'text-indigo-400 animate-pulse' : s === 'completed' ? 'text-emerald-400' : 'text-slate-600'} />
+                      {s === 'completed' ? (
+                        <CheckCircle2 size={14} className="text-emerald-400" />
+                      ) : s === 'active' ? (
+                        <RotateCw size={14} className="animate-spin text-indigo-400" />
+                      ) : (
+                        <span className="text-[10px] font-mono text-slate-600">2</span>
+                      )}
+                    </div>
+                    <div className="text-xs font-semibold">2. faster-whisper</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5 truncate">Transcripción CUDA FP16</div>
+                  </div>
+                );
+              })()}
+
+              {/* Fase 3: Gemini / LLaMA */}
+              {(() => {
+                const s = getStepStatus(3);
+                return (
+                  <div className={`p-2.5 rounded-xs border transition-all ${
+                    s === 'active' 
+                      ? 'bg-indigo-900/40 border-indigo-400 text-indigo-200 shadow-sm shadow-indigo-500/20' 
+                      : s === 'completed' 
+                      ? 'bg-emerald-950/30 border-emerald-700/50 text-emerald-300' 
+                      : 'bg-dark-900/40 border-dark-700/60 text-slate-500'
+                  }`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <Brain size={15} className={s === 'active' ? 'text-indigo-400 animate-pulse' : s === 'completed' ? 'text-emerald-400' : 'text-slate-600'} />
+                      {s === 'completed' ? (
+                        <CheckCircle2 size={14} className="text-emerald-400" />
+                      ) : s === 'active' ? (
+                        <RotateCw size={14} className="animate-spin text-indigo-400" />
+                      ) : (
+                        <span className="text-[10px] font-mono text-slate-600">3</span>
+                      )}
+                    </div>
+                    <div className="text-xs font-semibold">3. Gemini 2.5 Flash</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5 truncate">Curación y perfilado Big Five</div>
+                  </div>
+                );
+              })()}
+
+              {/* Fase 4: SQLite Sync */}
+              {(() => {
+                const s = getStepStatus(4);
+                return (
+                  <div className={`p-2.5 rounded-xs border transition-all ${
+                    s === 'active' 
+                      ? 'bg-indigo-900/40 border-indigo-400 text-indigo-200 shadow-sm shadow-indigo-500/20' 
+                      : s === 'completed' 
+                      ? 'bg-emerald-950/30 border-emerald-700/50 text-emerald-300' 
+                      : 'bg-dark-900/40 border-dark-700/60 text-slate-500'
+                  }`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <Database size={15} className={s === 'active' ? 'text-indigo-400 animate-pulse' : s === 'completed' ? 'text-emerald-400' : 'text-slate-600'} />
+                      {s === 'completed' ? (
+                        <CheckCircle2 size={14} className="text-emerald-400" />
+                      ) : s === 'active' ? (
+                        <RotateCw size={14} className="animate-spin text-indigo-400" />
+                      ) : (
+                        <span className="text-[10px] font-mono text-slate-600">4</span>
+                      )}
+                    </div>
+                    <div className="text-xs font-semibold">4. Sincronización</div>
+                    <div className="text-[10px] text-slate-400 mt-0.5 truncate">Base de datos y clones</div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Mini terminal de salida en vivo */}
+            <div className="bg-dark-900/90 rounded-xs border border-dark-750 p-2.5 space-y-1">
+              <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono border-b border-dark-800 pb-1 mb-1">
+                <span className="flex items-center gap-1.5">
+                  <Terminal size={12} className="text-indigo-400" />
+                  Salida estándar en tiempo real
+                </span>
+                <span className="text-[10px] text-slate-500">Auto-scroll activo</span>
+              </div>
+              <div 
+                ref={logsTerminalRef}
+                className="max-h-28 overflow-y-auto font-mono text-[11px] text-slate-300 space-y-0.5 scrollbar-thin select-text"
+              >
+                {pipelineData?.logs && pipelineData.logs.length > 0 ? (
+                  pipelineData.logs.slice(-15).map((logLine, idx) => (
+                    <div key={idx} className="leading-tight text-slate-400 hover:text-slate-200">
+                      <span className="text-slate-600 mr-1.5">&gt;</span>
+                      {logLine}
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-slate-500 italic">Esperando primeras líneas de salida del proceso...</div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tarjeta de éxito tras completar el proceso */}
+        {!isEffectivelyProcessing && justFinished && (
+          <div className="p-4 rounded-xs bg-emerald-950/30 border border-emerald-600/50 flex items-center justify-between animate-in fade-in slide-in-from-top-2">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 rounded-xs bg-emerald-900/50 text-emerald-400 border border-emerald-700/50">
+                <CheckCircle2 size={20} />
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold text-emerald-200">
+                  ¡Procesamiento Completado Exitosamente!
+                </h4>
+                <p className="text-xs text-emerald-400/80">
+                  Las transcripciones con faster-whisper, la extracción de muestras de voz y la actualización de perfiles con Gemini finalizaron correctamente.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setJustFinished(false)}
+              className="btn-secondary text-xs px-3 py-1.5 text-slate-300 hover:text-white"
+            >
+              Entendido
+            </button>
+          </div>
+        )}
+
+        {/* Tarjeta de alerta si falló */}
+        {!isEffectivelyProcessing && justFailed && (
+          <div className="p-4 rounded-xs bg-rose-950/30 border border-rose-600/50 flex items-center justify-between animate-in fade-in slide-in-from-top-2">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 rounded-xs bg-rose-950/60 text-rose-400 border border-rose-800/50">
+                <AlertCircle size={20} />
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold text-rose-200">
+                  Advertencia o Error en el Procesamiento
+                </h4>
+                <p className="text-xs text-rose-400/80 max-w-2xl font-mono">
+                  {justFailed}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-2">
+              {onOpenLogs && (
+                <button
+                  onClick={onOpenLogs}
+                  className="btn-rose text-xs px-3 py-1.5"
+                >
+                  Ver Logs
+                </button>
+              )}
+              <button
+                onClick={() => setJustFailed(null)}
+                className="btn-secondary text-xs px-3 py-1.5 text-slate-300 hover:text-white"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Sección de Disparo Manual de Procesamiento por Lote */}
         <div className="p-4 rounded-xs bg-dark-850 border border-dark-700 flex flex-col sm:flex-row sm:items-center justify-between gap-4">

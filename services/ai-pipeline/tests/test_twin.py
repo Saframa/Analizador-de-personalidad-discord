@@ -26,6 +26,7 @@ from core.contracts.models import (
     SocialDynamics,
     TemporalPatterns,
     TraitEvaluation,
+    UserPreferences,
     UserProfile,
     Utterance,
 )
@@ -331,6 +332,37 @@ def test_digital_twin_chat_auto_corpus_loading(tmp_path, mock_profile, mock_tran
     assert len(chat.few_shot_dialogues) >= 1
     assert "bot" in chat.few_shot_dialogues[0]["context"]
     assert "flama" in chat.few_shot_dialogues[0]["reply"]
+
+
+def test_compile_twin_prompt_preferences_and_tech_anti_hallucination(mock_profile):
+    """Verifica que los gustos/disgustos se incluyan y que términos de programación se purguen si no es programador."""
+    profile = mock_profile.model_copy()
+    profile.preferences = UserPreferences(
+        likes=["Bleach", "Rocket League", "Red Rising"],
+        dislikes=["levantarse temprano", "sopa de verduras"],
+    )
+    profile.notes = ["estudiante de secundaria", "le gusta el anime"]
+    profile.emotional_triggers = EmotionalTriggers(
+        tilts=["perder una ranked", "cierres intempestivos de sesión en el sistema mientras programa"],
+        hyperfocus_topics=["Bleach", "proyectos de software"],
+    )
+
+    prompt = compile_twin_prompt(profile)
+
+    # 1. Verificación de gustos y disgustos
+    assert "TUS GUSTOS Y PREFERENCIAS REALES" in prompt
+    assert "Bleach, Rocket League, Red Rising" in prompt
+    assert "levantarse temprano, sopa de verduras" in prompt
+
+    # 2. Verificación de regla estricta anti-programación
+    assert "NO ERES PROGRAMADOR NI INGENIERO POR DEFECTO" in prompt
+    assert "PROHIBIDO HABLAR DE CÓDIGO O INFORMÁTICA" in prompt
+
+    # 3. Verificación de sanitización de términos técnicos espurios de emotional triggers
+    assert "cierres intempestivos de sesión en el sistema mientras programa" not in prompt
+    assert "proyectos de software" not in prompt
+    assert "perder una ranked" in prompt
+
 
 
 

@@ -11,7 +11,9 @@ import {
   RotateCw,
   Edit2,
   Save,
-  Filter
+  Filter,
+  Heart,
+  ThumbsDown
 } from 'lucide-react';
 import { fetchUserDetail, uploadAvatar, updateUserData } from '../api';
 
@@ -105,6 +107,9 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
   const archetype = user?.archetype || {};
   const bigFive = user?.big_five || {};
   const lexicon = user?.lexicon || {};
+  const preferences = user?.preferences || { likes: [], dislikes: [] };
+  const likes = preferences.likes || [];
+  const dislikes = preferences.dislikes || [];
   const rawTopWords = lexicon.top_words || [];
 
   // Filtrado de vocabulario
@@ -438,6 +443,61 @@ export default function UserDetailModal({ userId, onClose, onOpenChat }) {
                     </div>
                   )}
                 </div>
+
+                {/* Gustos y Preferencias Reales (Likes y Dislikes) */}
+                {((likes && likes.length > 0) || (dislikes && dislikes.length > 0)) && (
+                  <div className="p-4 rounded-xs bg-dark-850 border border-dark-700 space-y-3.5">
+                    <div className="border-b border-dark-700/60 pb-2.5 flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <Heart size={16} className="text-rose-400" />
+                        <h3 className="font-semibold text-slate-200 text-sm">
+                          Gustos y Preferencias Reales
+                        </h3>
+                      </div>
+                      <span className="text-[11px] text-slate-500">
+                        Detectados en conversaciones
+                      </span>
+                    </div>
+
+                    <div className="space-y-3">
+                      {likes && likes.length > 0 && (
+                        <div>
+                          <div className="text-xs font-semibold text-emerald-400 mb-1.5 flex items-center space-x-1.5">
+                            <span>❤️ Cosas que le gustan / Pasiones:</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {likes.map((like, idx) => (
+                              <span
+                                key={idx}
+                                className="px-2.5 py-1 rounded-xs bg-emerald-950/40 border border-emerald-700/50 text-emerald-300 text-xs font-medium"
+                              >
+                                {like}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {dislikes && dislikes.length > 0 && (
+                        <div>
+                          <div className="text-xs font-semibold text-rose-400 mb-1.5 flex items-center space-x-1.5">
+                            <span>❌ Cosas que le desagradan / No le gustan:</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {dislikes.map((dislike, idx) => (
+                              <span
+                                key={idx}
+                                className="px-2.5 py-1 rounded-xs bg-rose-950/40 border border-rose-700/50 text-rose-300 text-xs font-medium"
+                              >
+                                {dislike}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Diccionario de Palabras Utilizadas */}
                 <div className="p-4 rounded-xs bg-dark-850 border border-dark-700 space-y-3.5">

@@ -5,10 +5,13 @@ uruguaya/rioplatense y protocolo estricto de liberación de memoria VRAM.
 """
 
 import gc
+import logging
 import math
 import os
 from typing import Any, Dict, List, Optional
 import torch
+
+logger = logging.getLogger(__name__)
 
 if os.name == "nt":
     try:
@@ -122,39 +125,67 @@ class WhisperTranscriber:
 
         results: List[Dict[str, Any]] = []
 
-        for seg in segments_iter:
-            clean_text = seg.text.strip()
-            if not clean_text:
-                continue
+        try:
+            for seg in segments_iter:
+                clean_text = seg.text.strip()
+                if not clean_text:
+                    continue
 
-            # Calcular confianza aproximada desde avg_logprob: P = exp(logprob)
-            try:
-                confidence = round(min(1.0, max(0.0, math.exp(seg.avg_logprob))), 4)
-            except (OverflowError, ValueError):
-                confidence = 0.5
+                # Calcular confianza aproximada desde avg_logprob: P = exp(logprob)
+                try:
+                    confidence = round(min(1.0, max(0.0, math.exp(seg.avg_logprob))), 4)
+                except (OverflowError, ValueError):
+                    confidence = 0.5
 
-            words_data = []
-            if seg.words:
-                for w in seg.words:
-                    words_data.append(
-                        {
-                            "word": w.word.strip(),
-                            "start": round(w.start, 3),
-                            "end": round(w.end, 3),
-                            "probability": round(w.probability, 4),
-                        }
-                    )
+                words_data = []
+                if seg.words:
+                    for w in seg.words:
+                        words_data.append(
+                            {
+                                "word": w.word.strip(),
+                                "start": round(w.start, 3),
+                                "end": round(w.end, 3),
+                                "probability": round(w.probability, 4),
+                            }
+                        )
+                elif clean_text:
+                    tokens = clean_text.split()
+                    if tokens:
+                        dt = (seg.end - seg.start) / max(1, len(tokens))
+                        for idx, tok in enumerate(tokens):
+                            words_data.append(
+                                {
+                                    "word": tok,
+                                    "start": round(seg.start + idx * dt, 3),
+                                    "end": round(seg.start + (idx + 1) * dt, 3),
+                                    "probability": confidence,
+                                }
+                            )
 
-            results.append(
-                {
-                    "start": round(seg.start, 3),
-                    "end": round(seg.end, 3),
-                    "duration": round(seg.end - seg.start, 3),
-                    "text": clean_text,
-                    "confidence": confidence,
-                    "words": words_data,
-                }
-            )
+                results.append(
+                    {
+                        "start": round(seg.start, 3),
+                        "end": round(seg.end, 3),
+                        "duration": round(seg.end - seg.start, 3),
+                        "text": clean_text,
+                        "confidence": confidence,
+                        "words": words_data,
+                    }
+                )
+        except (IndexError, RuntimeError, Exception) as align_err:
+            if word_timestamps:
+                logger.warning(
+                    f"Alineación DTW de palabras falló en {audio_path} ({align_err}). Reintentando sin word_timestamps..."
+                )
+                return self.transcribe_file(
+                    audio_path,
+                    language=language,
+                    beam_size=beam_size,
+                    word_timestamps=False,
+                )
+            else:
+                logger.error(f"Error procesando transcripción de {audio_path}: {align_err}")
+                return results
 
         return results
 
